@@ -98,7 +98,6 @@ const App = () => {
   const [dragMode, setDragMode] = useState(null);
   const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
   const [caretIndicator, setCaretIndicator] = useState(null);
-  const [touchPreview, setTouchPreview] = useState(null);
 
   const editorRef = useRef(null);
   const flowRef = useRef(null);
@@ -163,7 +162,6 @@ const App = () => {
 
   const clearVisualIndicator = () => {
     setCaretIndicator(null);
-    setTouchPreview(null);
   };
 
   const clearDragState = () => {
@@ -508,10 +506,9 @@ const App = () => {
     insertValueAtSelection(droppedValue, dragPayload?.category ?? activeCategory);
   };
 
-  const startTouchDrag = (payload, label, touch) => {
+  const startTouchDrag = (payload, touch) => {
     touchDragRef.current = {
       payload,
-      label,
       startX: touch.clientX,
       startY: touch.clientY,
       active: false,
@@ -535,12 +532,6 @@ const App = () => {
       setDragMode('touch');
       setDragPayload(session.payload);
     }
-
-    setTouchPreview({
-      x: touch.clientX,
-      y: touch.clientY,
-      label: session.label,
-    });
     updateDropTargetFromPoint(touch.clientX, touch.clientY, session.payload.type);
   };
 
@@ -627,15 +618,6 @@ const App = () => {
             />
           )}
 
-          {touchPreview && (
-            <div
-              className="pointer-events-none fixed z-30 -translate-x-1/2 -translate-y-full rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-bold text-white shadow-xl opacity-90 scale-90"
-              style={{ left: touchPreview.x, top: touchPreview.y - 12 }}
-            >
-              {touchPreview.label}
-            </div>
-          )}
-
           <div
             ref={flowRef}
             className="leading-[2.2] text-lg font-medium text-slate-700 whitespace-pre-wrap break-words"
@@ -678,16 +660,16 @@ const App = () => {
                     }}
                     onDragStart={(e) => handleBubbleDragStart(e, index, part)}
                     onDragEnd={handleDragEnd}
-                    onTouchStart={(e) => startTouchDrag({ type: 'bubble', value: part.value, index, category: part.category }, part.value, e.touches[0])}
+                    onTouchStart={(e) => startTouchDrag({ type: 'bubble', value: part.value, index, category: part.category }, e.touches[0])}
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     onTouchCancel={handleTouchCancel}
                     onKeyDown={(e) => handleBubbleKeyDown(e, index)}
                     onDragOver={(e) => handleInlineBoundaryDragOver(e, index)}
                     onDrop={handleDrop}
-                    className={`drag-chip mx-1 inline-flex align-baseline rounded-full border items-center transition-all shadow-sm ${
+                    className={`drag-chip mx-1 inline-flex align-baseline rounded-full border items-center transition-all duration-150 ease-out shadow-sm overflow-hidden ${
                       isTouchDraggingBubble(index)
-                        ? 'h-5 w-8 justify-center px-0 py-0 opacity-55 border-blue-300 bg-blue-100 text-transparent shadow-none'
+                        ? 'h-2 w-7 justify-center px-0 py-0 opacity-85 border-0 bg-blue-400 shadow-none'
                         : replaceTargetIndex === index
                         ? 'border-blue-500 bg-blue-600 text-white scale-105'
                         : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
@@ -758,7 +740,7 @@ const App = () => {
                 點選可直接插入，拖曳可放到文本中的指定位置
               </p>
             )}
-            {(dragPayload || touchPreview) && (
+            {dragMode === 'touch' && dragPayload && (
               <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
                 拖曳到文字上方時，會自動吸附到最近的詞界線
               </p>
@@ -773,13 +755,13 @@ const App = () => {
                     onClick={() => handleInsertValue(item)}
                     onDragStart={(e) => handleListItemDragStart(e, item)}
                     onDragEnd={handleDragEnd}
-                    onTouchStart={(e) => startTouchDrag({ type: 'library-item', value: item, category: activeCategory }, item, e.touches[0])}
+                    onTouchStart={(e) => startTouchDrag({ type: 'library-item', value: item, category: activeCategory }, e.touches[0])}
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     onTouchCancel={handleTouchCancel}
-                    className={`drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing ${
+                    className={`drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 rounded-2xl border border-transparent hover:shadow-md transition-all duration-150 ease-out group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing overflow-hidden ${
                       isTouchDraggingListItem(item)
-                        ? 'h-5 w-10 px-0 py-0 rounded-full opacity-55 border-blue-300 bg-blue-100 shadow-none'
+                        ? 'h-2 w-8 px-0 py-0 rounded-full opacity-85 border-0 bg-blue-400 shadow-none'
                         : 'p-4'
                     }`}
                   >
