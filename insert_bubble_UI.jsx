@@ -22,7 +22,8 @@ const App = () => {
 
   const [activeCategory, setActiveCategory] = useState(null);
   const [insertionIndex, setInsertionIndex] = useState(null);
-  const [draggedItem, setDraggedItem] = useState(null);
+  const [replaceTargetIndex, setReplaceTargetIndex] = useState(null);
+  const [dragPayload, setDragPayload] = useState(null);
   const [dropTargetIndex, setDropTargetIndex] = useState(null);
   const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
 
@@ -44,34 +45,62 @@ const App = () => {
     setContentParts((currentParts) => currentParts.filter((_, index) => index !== targetIndex));
     setActiveCategory(null);
     setInsertionIndex(Math.max(0, targetIndex - 1));
+    setReplaceTargetIndex(null);
     setDropTargetIndex(null);
     setIsDraggingOverEditor(false);
   };
 
-  const insertValueAtIndex = (value, preferredIndex = insertionIndex, forcedCategory = activeCategory) => {
-    let targetIndex = preferredIndex !== null ? preferredIndex : contentParts.length;
-    if (targetIndex < 0) targetIndex = 0;
+  const moveBubbleToIndex = (sourceIndex, targetSlot) => {
+    const sourcePart = contentParts[sourceIndex];
+    if (!sourcePart || sourcePart.type !== 'bubble') return;
 
     const newParts = [...contentParts];
-    const targetPart = newParts[targetIndex];
-    let insertedIndex = targetIndex;
+    const [movedBubble] = newParts.splice(sourceIndex, 1);
+    const adjustedTargetSlot = sourceIndex < targetSlot ? targetSlot - 1 : targetSlot;
+    const safeTargetSlot = Math.max(0, Math.min(adjustedTargetSlot, newParts.length));
+
+    newParts.splice(safeTargetSlot, 0, { ...movedBubble, isNew: false });
+    setContentParts(newParts);
+    setInsertionIndex(safeTargetSlot);
+    setReplaceTargetIndex(null);
+    setActiveCategory(null);
+    setDropTargetIndex(null);
+    setIsDraggingOverEditor(false);
+    setDragPayload(null);
+  };
+
+  const insertValueAtIndex = (
+    value,
+    preferredIndex = insertionIndex,
+    forcedCategory = activeCategory,
+    forcedReplaceIndex = replaceTargetIndex,
+  ) => {
+    let targetSlot = preferredIndex !== null ? preferredIndex : contentParts.length;
+    if (targetSlot < 0) targetSlot = 0;
+
+    const newParts = [...contentParts];
+    const replaceIndex = forcedReplaceIndex;
+    const targetPart = replaceIndex !== null ? newParts[replaceIndex] : newParts[targetSlot];
     const bubbleCategory = forcedCategory || targetPart?.category || null;
+    let insertedIndex = targetSlot;
     const newBubblePart = { type: 'bubble', value, category: bubbleCategory, isNew: true };
 
-    if (targetPart && (targetPart.type === 'placeholder' || targetPart.type === 'bubble')) {
-      newParts[targetIndex] = newBubblePart;
-    } else if (targetIndex >= newParts.length) {
+    if (replaceIndex !== null && targetPart && (targetPart.type === 'placeholder' || targetPart.type === 'bubble')) {
+      newParts[replaceIndex] = { ...newBubblePart, category: bubbleCategory };
+      insertedIndex = replaceIndex;
+    } else if (targetSlot >= newParts.length) {
       newParts.push(newBubblePart);
       insertedIndex = newParts.length - 1;
     } else {
-      newParts.splice(targetIndex + 1, 0, newBubblePart);
-      insertedIndex += 1;
+      newParts.splice(targetSlot, 0, { ...newBubblePart, category: bubbleCategory });
+      insertedIndex = targetSlot;
     }
 
     setContentParts(newParts);
     setActiveCategory(null);
     setInsertionIndex(insertedIndex);
-    setDraggedItem(null);
+    setReplaceTargetIndex(null);
+    setDragPayload(null);
     setDropTargetIndex(null);
     setIsDraggingOverEditor(false);
   };
@@ -84,6 +113,11 @@ const App = () => {
     const newParts = [...contentParts];
     newParts[index].value = newValue;
     setContentParts(newParts);
+  };
+
+  const handleCaretFocus = (slotIndex) => {
+    setInsertionIndex(slotIndex);
+    setReplaceTargetIndex(null);
   };
 
   const getCaretOffset = (target) => {
@@ -122,14 +156,21 @@ const App = () => {
     removePartAtIndex(index);
   };
 
-  const handleDragStart = (e, item) => {
+  const handleListItemDragStart = (e, item) => {
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('text/plain', item);
-    setDraggedItem(item);
+    setDragPayload({ type: 'library-item', value: item });
+  };
+
+  const handleBubbleDragStart = (e, index, part) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', part.value);
+    setDragPayload({ type: 'bubble', value: part.value, index, category: part.category });
   };
 
   const handleDragEnd = () => {
-    setDraggedItem(null);
+    setDragPayload(null);
     setDropTargetIndex(null);
     setIsDraggingOverEditor(false);
   };
@@ -138,18 +179,24 @@ const App = () => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     setInsertionIndex(targetIndex);
+    setReplaceTargetIndex(null);
     setDropTargetIndex(targetIndex);
     setIsDraggingOverEditor(true);
   };
 
-  const handleDrop = (e, targetIndex = contentParts.length - 1) => {
+  const handleDrop = (e, targetIndex = contentParts.length, replaceIndex = null) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const droppedValue = e.dataTransfer.getData('text/plain') || draggedItem;
+    if (dragPayload?.type === 'bubble') {
+      moveBubbleToIndex(dragPayload.index, targetIndex);
+      return;
+    }
+
+    const droppedValue = e.dataTransfer.getData('text/plain') || dragPayload?.value;
     if (!droppedValue) return;
 
-    insertValueAtIndex(droppedValue, targetIndex);
+    insertValueAtIndex(droppedValue, targetIndex, activeCategory, replaceIndex);
   };
 
   const handleEditorDragLeave = (e) => {
@@ -189,19 +236,35 @@ const App = () => {
           onDragLeave={handleEditorDragLeave}
           onDrop={(e) => handleDrop(e)}
         >
-          <div className="flex flex-wrap items-center leading-[2.2] text-lg font-medium text-slate-700">
+          <div className="leading-[2.2] text-lg font-medium text-slate-700 whitespace-pre-wrap break-words">
+            <span
+              contentEditable
+              suppressContentEditableWarning
+              onFocus={() => handleCaretFocus(0)}
+              onMouseDown={() => handleCaretFocus(0)}
+              onDragOver={(e) => handleDragOverTarget(e, 0)}
+              onDrop={(e) => handleDrop(e, 0)}
+              className={`inline-block w-[2px] align-baseline outline-none ${
+                insertionIndex === 0 && replaceTargetIndex === null ? 'bg-blue-400' : 'bg-transparent'
+              }`}
+            >
+              {'\u200b'}
+            </span>
             {contentParts.map((part, index) => (
               <React.Fragment key={index}>
                 {part.type === 'text' ? (
                   <span
                     contentEditable
                     suppressContentEditableWarning
-                    onFocus={() => setInsertionIndex(index)}
+                    onFocus={() => {
+                      setInsertionIndex(index);
+                      setReplaceTargetIndex(null);
+                    }}
                     onBlur={(e) => handleTextEdit(index, e.target.innerText)}
                     onKeyDown={(e) => handleTextKeyDown(e, index)}
                     onDragOver={(e) => handleDragOverTarget(e, index)}
                     onDrop={(e) => handleDrop(e, index)}
-                    className={`outline-none transition-all rounded px-0.5 min-w-[4px] inline-block
+                    className={`outline-none transition-all rounded px-0.5 min-w-[4px] inline
                       ${part.isNew ? 'text-blue-600 font-bold bg-blue-50' : 'focus:bg-slate-100'}
                       ${insertionIndex === index && !part.isNew ? 'ring-2 ring-blue-100 bg-slate-50' : ''}
                       ${dropTargetIndex === index ? 'ring-2 ring-blue-300 bg-blue-50' : ''}
@@ -210,40 +273,75 @@ const App = () => {
                     {part.value}
                   </span>
                 ) : part.type === 'bubble' ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInsertionIndex(index);
-                      setActiveCategory(part.category);
-                    }}
-                    onFocus={() => setInsertionIndex(index)}
-                    onKeyDown={(e) => handleBubbleKeyDown(e, index)}
-                    onDragOver={(e) => handleDragOverTarget(e, index)}
-                    onDrop={(e) => handleDrop(e, index)}
-                    className={`mx-1 px-3 py-0.5 rounded-full border flex items-center gap-1 transition-all shadow-sm ${
-                      dropTargetIndex === index
-                        ? 'border-blue-600 bg-blue-100 text-blue-700 scale-105'
-                        : insertionIndex === index
-                        ? 'border-blue-500 bg-blue-600 text-white scale-105'
-                        : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
-                    }`}
-                  >
-                    <Check size={14} />
-                    <span className="text-sm font-bold">{part.value}</span>
-                  </button>
+                  <>
+                    <span
+                      contentEditable
+                      suppressContentEditableWarning
+                      onFocus={() => handleCaretFocus(index)}
+                      onMouseDown={() => handleCaretFocus(index)}
+                      onDragOver={(e) => handleDragOverTarget(e, index)}
+                      onDrop={(e) => handleDrop(e, index)}
+                      className={`inline-block w-[2px] align-baseline outline-none ${
+                        insertionIndex === index && replaceTargetIndex === null ? 'bg-blue-400' : 'bg-transparent'
+                      }`}
+                    >
+                      {'\u200b'}
+                    </span>
+                    <button
+                      type="button"
+                      draggable
+                      onClick={() => {
+                        setInsertionIndex(index);
+                        setReplaceTargetIndex(index);
+                        setActiveCategory(part.category);
+                      }}
+                      onFocus={() => {
+                        setInsertionIndex(index);
+                        setReplaceTargetIndex(index);
+                      }}
+                      onDragStart={(e) => handleBubbleDragStart(e, index, part)}
+                      onDragEnd={handleDragEnd}
+                      onKeyDown={(e) => handleBubbleKeyDown(e, index)}
+                      onDragOver={(e) => handleDragOverTarget(e, index)}
+                      onDrop={(e) => handleDrop(e, index, index)}
+                      className={`mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border items-center gap-1 transition-all shadow-sm ${
+                        dropTargetIndex === index
+                          ? 'border-blue-600 bg-blue-100 text-blue-700 scale-105'
+                          : replaceTargetIndex === index
+                          ? 'border-blue-500 bg-blue-600 text-white scale-105'
+                          : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
+                      }`}
+                    >
+                      <span className="text-sm font-bold">{part.value}</span>
+                    </button>
+                    <span
+                      contentEditable
+                      suppressContentEditableWarning
+                      onFocus={() => handleCaretFocus(index + 1)}
+                      onMouseDown={() => handleCaretFocus(index + 1)}
+                      onDragOver={(e) => handleDragOverTarget(e, index + 1)}
+                      onDrop={(e) => handleDrop(e, index + 1)}
+                      className={`inline-block w-[2px] align-baseline outline-none ${
+                        insertionIndex === index + 1 && replaceTargetIndex === null ? 'bg-blue-400' : 'bg-transparent'
+                      }`}
+                    >
+                      {'\u200b'}
+                    </span>
+                  </>
                 ) : (
                   <button
                     type="button"
                     onClick={() => {
                       setInsertionIndex(index);
+                      setReplaceTargetIndex(index);
                       setActiveCategory(part.category);
                     }}
                     onDragOver={(e) => handleDragOverTarget(e, index)}
-                    onDrop={(e) => handleDrop(e, index)}
-                    className={`mx-1 px-3 py-0.5 rounded-full border-2 border-dashed flex items-center gap-1 transition-all ${
+                    onDrop={(e) => handleDrop(e, index, index)}
+                    className={`mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border-2 border-dashed items-center gap-1 transition-all ${
                       dropTargetIndex === index
                         ? 'border-blue-600 bg-blue-100 text-blue-700 scale-105 shadow-sm'
-                        : insertionIndex === index
+                        : replaceTargetIndex === index
                         ? 'border-blue-500 bg-blue-50 text-blue-600 scale-105 shadow-sm'
                         : 'border-slate-300 bg-slate-50 text-slate-500 animate-pulse'
                     }`}
@@ -254,6 +352,19 @@ const App = () => {
                 )}
               </React.Fragment>
             ))}
+            <span
+              contentEditable
+              suppressContentEditableWarning
+              onFocus={() => handleCaretFocus(contentParts.length)}
+              onMouseDown={() => handleCaretFocus(contentParts.length)}
+              onDragOver={(e) => handleDragOverTarget(e, contentParts.length)}
+              onDrop={(e) => handleDrop(e, contentParts.length)}
+              className={`inline-block w-[2px] align-baseline outline-none ${
+                insertionIndex === contentParts.length && replaceTargetIndex === null ? 'bg-blue-400' : 'bg-transparent'
+              }`}
+            >
+              {'\u200b'}
+            </span>
           </div>
 
           <div className="mt-auto pt-6 flex justify-between items-center text-slate-300 pointer-events-none">
@@ -285,7 +396,7 @@ const App = () => {
 
         <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-64 opacity-100' : 'h-0 opacity-0'}`}>
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
-            {draggedItem && (
+            {dragPayload && (
               <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
                 拖曳項目到上方文字區即可插入
               </p>
@@ -297,7 +408,7 @@ const App = () => {
                     key={index}
                     onClick={() => handleInsertValue(item)}
                     draggable
-                    onDragStart={(e) => handleDragStart(e, item)}
+                    onDragStart={(e) => handleListItemDragStart(e, item)}
                     onDragEnd={handleDragEnd}
                     className="flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 p-4 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm"
                   >
