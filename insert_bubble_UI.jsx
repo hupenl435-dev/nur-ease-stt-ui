@@ -766,9 +766,9 @@ const App = () => {
                     onKeyDown={(e) => handleBubbleKeyDown(e, index)}
                     onDragOver={(e) => handleInlineBoundaryDragOver(e, index)}
                     onDrop={handleDrop}
-                    className={`drag-chip mx-1 inline-flex align-baseline rounded-full border items-center transition-all duration-150 ease-out shadow-sm overflow-hidden ${
+                    className={`drag-chip mx-1 inline-flex align-baseline rounded-full border items-center justify-center transition-all duration-150 ease-out shadow-sm overflow-hidden ${
                       isTouchDraggingBubble(index)
-                        ? 'h-2 w-7 justify-center px-0 py-0 opacity-85 border-0 bg-blue-400 shadow-none'
+                        ? 'h-10 w-2.5 px-0 py-0 opacity-85 border-0 bg-blue-400 shadow-none'
                         : replaceTargetIndex === index
                         ? 'border-blue-500 bg-blue-600 text-white scale-105'
                         : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
@@ -903,10 +903,10 @@ const App = () => {
 
       {touchPreview && dragMode === 'touch' && (
         <div
-          className="pointer-events-none fixed z-30 h-2.5 w-12 rounded-full bg-blue-500/90 shadow-[0_10px_30px_rgba(37,99,235,0.28)]"
+          className="pointer-events-none fixed z-30 h-12 w-2.5 rounded-full bg-blue-500/90 shadow-[0_10px_30px_rgba(37,99,235,0.28)]"
           style={{
             left: `${touchPreview.x}px`,
-            top: `${touchPreview.y - 24}px`,
+            top: `${touchPreview.y - 6}px`,
             transform: 'translate(-50%, -50%)',
           }}
         />
@@ -955,7 +955,7 @@ const App = () => {
         @keyframes bubble-expand {
           0% {
             opacity: 0.55;
-            transform: scaleX(0.42) scaleY(0.38);
+            transform: scaleX(0.2) scaleY(0.18);
           }
           100% {
             opacity: 1;
