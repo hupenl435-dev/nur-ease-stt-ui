@@ -95,6 +95,7 @@ const App = () => {
   const [selectionTarget, setSelectionTarget] = useState(null);
   const [replaceTargetIndex, setReplaceTargetIndex] = useState(null);
   const [dragPayload, setDragPayload] = useState(null);
+  const [dragMode, setDragMode] = useState(null);
   const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
   const [caretIndicator, setCaretIndicator] = useState(null);
   const [touchPreview, setTouchPreview] = useState(null);
@@ -167,6 +168,7 @@ const App = () => {
 
   const clearDragState = () => {
     setDragPayload(null);
+    setDragMode(null);
     setIsDraggingOverEditor(false);
     clearVisualIndicator();
   };
@@ -444,6 +446,7 @@ const App = () => {
   const handleListItemDragStart = (e, item) => {
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('text/plain', item);
+    setDragMode('pointer');
     setDragPayload({ type: 'library-item', value: item, category: activeCategory });
   };
 
@@ -451,6 +454,7 @@ const App = () => {
     e.stopPropagation();
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', part.value);
+    setDragMode('pointer');
     setDragPayload({ type: 'bubble', value: part.value, index, category: part.category });
   };
 
@@ -528,6 +532,7 @@ const App = () => {
     e.preventDefault();
 
     if (!dragPayload) {
+      setDragMode('touch');
       setDragPayload(session.payload);
     }
 
@@ -568,6 +573,12 @@ const App = () => {
     clearVisualIndicator();
   };
 
+  const isTouchDraggingBubble = (index) =>
+    dragMode === 'touch' && dragPayload?.type === 'bubble' && dragPayload.index === index;
+
+  const isTouchDraggingListItem = (item) =>
+    dragMode === 'touch' && dragPayload?.type === 'library-item' && dragPayload.value === item;
+
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans max-w-md mx-auto border-x shadow-2xl overflow-hidden relative text-slate-800">
       <header className="px-5 py-4 flex justify-between items-center bg-white border-b z-10 shadow-sm">
@@ -603,18 +614,22 @@ const App = () => {
         >
           {caretIndicator && (
             <div
-              className="pointer-events-none absolute z-20 w-[3px] rounded-full bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.18)]"
+              className={`pointer-events-none absolute z-20 rounded-full bg-blue-500 ${
+                dragMode === 'touch'
+                  ? 'w-[5px] shadow-[0_0_0_5px_rgba(59,130,246,0.22)]'
+                  : 'w-[3px] shadow-[0_0_0_3px_rgba(59,130,246,0.18)]'
+              }`}
               style={{
-                left: `${caretIndicator.left - 1.5}px`,
+                left: `${caretIndicator.left - (dragMode === 'touch' ? 2.5 : 1.5)}px`,
                 top: `${caretIndicator.top - 2}px`,
-                height: `${caretIndicator.height + 4}px`,
+                height: `${caretIndicator.height + (dragMode === 'touch' ? 8 : 4)}px`,
               }}
             />
           )}
 
           {touchPreview && (
             <div
-              className="pointer-events-none fixed z-30 -translate-x-1/2 -translate-y-full rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white shadow-xl opacity-90"
+              className="pointer-events-none fixed z-30 -translate-x-1/2 -translate-y-full rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-bold text-white shadow-xl opacity-90 scale-90"
               style={{ left: touchPreview.x, top: touchPreview.y - 12 }}
             >
               {touchPreview.label}
@@ -670,13 +685,17 @@ const App = () => {
                     onKeyDown={(e) => handleBubbleKeyDown(e, index)}
                     onDragOver={(e) => handleInlineBoundaryDragOver(e, index)}
                     onDrop={handleDrop}
-                    className={`drag-chip mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border items-center transition-all shadow-sm ${
-                      replaceTargetIndex === index
+                    className={`drag-chip mx-1 inline-flex align-baseline rounded-full border items-center transition-all shadow-sm ${
+                      isTouchDraggingBubble(index)
+                        ? 'h-5 w-8 justify-center px-0 py-0 opacity-55 border-blue-300 bg-blue-100 text-transparent shadow-none'
+                        : replaceTargetIndex === index
                         ? 'border-blue-500 bg-blue-600 text-white scale-105'
                         : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
                     }`}
                   >
-                    <span className="text-sm font-bold">{part.value}</span>
+                    <span className={`font-bold ${isTouchDraggingBubble(index) ? 'text-[0px]' : 'text-sm'}`}>
+                      {part.value}
+                    </span>
                   </button>
                 ) : (
                   <button
@@ -758,10 +777,20 @@ const App = () => {
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     onTouchCancel={handleTouchCancel}
-                    className="drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 p-4 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing"
+                    className={`drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing ${
+                      isTouchDraggingListItem(item)
+                        ? 'h-5 w-10 px-0 py-0 rounded-full opacity-55 border-blue-300 bg-blue-100 shadow-none'
+                        : 'p-4'
+                    }`}
                   >
-                    <span className="text-sm font-bold text-slate-700 group-hover:text-blue-600 truncate">{item}</span>
-                    <div className="w-6 h-6 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                    <span className={`font-bold text-slate-700 group-hover:text-blue-600 truncate ${isTouchDraggingListItem(item) ? 'text-[0px]' : 'text-sm'}`}>
+                      {item}
+                    </span>
+                    <div className={`rounded-full bg-slate-50 flex items-center justify-center transition-colors ${
+                      isTouchDraggingListItem(item)
+                        ? 'w-0 h-0 overflow-hidden opacity-0'
+                        : 'w-6 h-6 group-hover:bg-blue-600 group-hover:text-white'
+                    }`}>
                       <Check size={12} className="opacity-0 group-hover:opacity-100" />
                     </div>
                   </button>
