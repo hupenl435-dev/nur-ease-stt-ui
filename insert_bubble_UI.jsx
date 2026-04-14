@@ -22,6 +22,9 @@ const App = () => {
 
   const [activeCategory, setActiveCategory] = useState(null);
   const [insertionIndex, setInsertionIndex] = useState(null);
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState(null);
+  const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
 
   const categories = [
     { id: 'personnel', label: '人員', icon: <Users size={16} />, color: 'blue' },
@@ -37,29 +40,122 @@ const App = () => {
     templates: ['給藥提醒', '疼痛評估', '交班紀錄', '生命徵象追蹤', '異常事件通報'],
   };
 
-  const handleInsertValue = (value) => {
-    let targetIndex = insertionIndex !== null ? insertionIndex : contentParts.length - 1;
+  const removePartAtIndex = (targetIndex) => {
+    setContentParts((currentParts) => currentParts.filter((_, index) => index !== targetIndex));
+    setActiveCategory(null);
+    setInsertionIndex(Math.max(0, targetIndex - 1));
+    setDropTargetIndex(null);
+    setIsDraggingOverEditor(false);
+  };
+
+  const insertValueAtIndex = (value, preferredIndex = insertionIndex, forcedCategory = activeCategory) => {
+    let targetIndex = preferredIndex !== null ? preferredIndex : contentParts.length;
     if (targetIndex < 0) targetIndex = 0;
 
     const newParts = [...contentParts];
     const targetPart = newParts[targetIndex];
+    let insertedIndex = targetIndex;
+    const bubbleCategory = forcedCategory || targetPart?.category || null;
+    const newBubblePart = { type: 'bubble', value, category: bubbleCategory, isNew: true };
 
-    if (targetPart && targetPart.type === 'placeholder') {
-      newParts[targetIndex] = { type: 'text', value, isNew: true };
+    if (targetPart && (targetPart.type === 'placeholder' || targetPart.type === 'bubble')) {
+      newParts[targetIndex] = newBubblePart;
+    } else if (targetIndex >= newParts.length) {
+      newParts.push(newBubblePart);
+      insertedIndex = newParts.length - 1;
     } else {
-      newParts.splice(targetIndex + 1, 0, { type: 'text', value, isNew: true });
-      targetIndex += 1;
+      newParts.splice(targetIndex + 1, 0, newBubblePart);
+      insertedIndex += 1;
     }
 
     setContentParts(newParts);
     setActiveCategory(null);
-    setInsertionIndex(targetIndex);
+    setInsertionIndex(insertedIndex);
+    setDraggedItem(null);
+    setDropTargetIndex(null);
+    setIsDraggingOverEditor(false);
+  };
+
+  const handleInsertValue = (value) => {
+    insertValueAtIndex(value);
   };
 
   const handleTextEdit = (index, newValue) => {
     const newParts = [...contentParts];
     newParts[index].value = newValue;
     setContentParts(newParts);
+  };
+
+  const getCaretOffset = (target) => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !target.contains(selection.anchorNode)) {
+      return null;
+    }
+
+    return selection.getRangeAt(0).startOffset;
+  };
+
+  const handleTextKeyDown = (e, index) => {
+    const caretOffset = getCaretOffset(e.currentTarget);
+    if (caretOffset === null) return;
+
+    const currentValueLength = e.currentTarget.innerText.length;
+    const previousPart = contentParts[index - 1];
+    const nextPart = contentParts[index + 1];
+
+    if (e.key === 'Backspace' && caretOffset === 0 && previousPart?.type === 'bubble') {
+      e.preventDefault();
+      removePartAtIndex(index - 1);
+      return;
+    }
+
+    if (e.key === 'Delete' && caretOffset === currentValueLength && nextPart?.type === 'bubble') {
+      e.preventDefault();
+      removePartAtIndex(index + 1);
+    }
+  };
+
+  const handleBubbleKeyDown = (e, index) => {
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+
+    e.preventDefault();
+    removePartAtIndex(index);
+  };
+
+  const handleDragStart = (e, item) => {
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', item);
+    setDraggedItem(item);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDropTargetIndex(null);
+    setIsDraggingOverEditor(false);
+  };
+
+  const handleDragOverTarget = (e, targetIndex) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setInsertionIndex(targetIndex);
+    setDropTargetIndex(targetIndex);
+    setIsDraggingOverEditor(true);
+  };
+
+  const handleDrop = (e, targetIndex = contentParts.length - 1) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const droppedValue = e.dataTransfer.getData('text/plain') || draggedItem;
+    if (!droppedValue) return;
+
+    insertValueAtIndex(droppedValue, targetIndex);
+  };
+
+  const handleEditorDragLeave = (e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setIsDraggingOverEditor(false);
+    setDropTargetIndex(null);
   };
 
   return (
@@ -81,12 +177,17 @@ const App = () => {
 
       <main className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
         <div
-          className="flex-1 bg-white rounded-[2rem] p-6 shadow-sm border border-slate-200 flex flex-col relative overflow-y-auto"
+          className={`flex-1 bg-white rounded-[2rem] p-6 shadow-sm border flex flex-col relative overflow-y-auto transition-colors ${
+            isDraggingOverEditor ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200'
+          }`}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-              setInsertionIndex(contentParts.length - 1);
+              setInsertionIndex(contentParts.length);
             }
           }}
+          onDragOver={(e) => handleDragOverTarget(e, contentParts.length)}
+          onDragLeave={handleEditorDragLeave}
+          onDrop={(e) => handleDrop(e)}
         >
           <div className="flex flex-wrap items-center leading-[2.2] text-lg font-medium text-slate-700">
             {contentParts.map((part, index) => (
@@ -97,21 +198,52 @@ const App = () => {
                     suppressContentEditableWarning
                     onFocus={() => setInsertionIndex(index)}
                     onBlur={(e) => handleTextEdit(index, e.target.innerText)}
+                    onKeyDown={(e) => handleTextKeyDown(e, index)}
+                    onDragOver={(e) => handleDragOverTarget(e, index)}
+                    onDrop={(e) => handleDrop(e, index)}
                     className={`outline-none transition-all rounded px-0.5 min-w-[4px] inline-block
                       ${part.isNew ? 'text-blue-600 font-bold bg-blue-50' : 'focus:bg-slate-100'}
                       ${insertionIndex === index && !part.isNew ? 'ring-2 ring-blue-100 bg-slate-50' : ''}
+                      ${dropTargetIndex === index ? 'ring-2 ring-blue-300 bg-blue-50' : ''}
                     `}
                   >
                     {part.value}
                   </span>
-                ) : (
+                ) : part.type === 'bubble' ? (
                   <button
+                    type="button"
                     onClick={() => {
                       setInsertionIndex(index);
                       setActiveCategory(part.category);
                     }}
+                    onFocus={() => setInsertionIndex(index)}
+                    onKeyDown={(e) => handleBubbleKeyDown(e, index)}
+                    onDragOver={(e) => handleDragOverTarget(e, index)}
+                    onDrop={(e) => handleDrop(e, index)}
+                    className={`mx-1 px-3 py-0.5 rounded-full border flex items-center gap-1 transition-all shadow-sm ${
+                      dropTargetIndex === index
+                        ? 'border-blue-600 bg-blue-100 text-blue-700 scale-105'
+                        : insertionIndex === index
+                        ? 'border-blue-500 bg-blue-600 text-white scale-105'
+                        : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
+                    }`}
+                  >
+                    <Check size={14} />
+                    <span className="text-sm font-bold">{part.value}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInsertionIndex(index);
+                      setActiveCategory(part.category);
+                    }}
+                    onDragOver={(e) => handleDragOverTarget(e, index)}
+                    onDrop={(e) => handleDrop(e, index)}
                     className={`mx-1 px-3 py-0.5 rounded-full border-2 border-dashed flex items-center gap-1 transition-all ${
-                      insertionIndex === index
+                      dropTargetIndex === index
+                        ? 'border-blue-600 bg-blue-100 text-blue-700 scale-105 shadow-sm'
+                        : insertionIndex === index
                         ? 'border-blue-500 bg-blue-50 text-blue-600 scale-105 shadow-sm'
                         : 'border-slate-300 bg-slate-50 text-slate-500 animate-pulse'
                     }`}
@@ -153,12 +285,20 @@ const App = () => {
 
         <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-64 opacity-100' : 'h-0 opacity-0'}`}>
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
+            {draggedItem && (
+              <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
+                拖曳項目到上方文字區即可插入
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2 pb-4">
               {activeCategory &&
                 itemsData[activeCategory].map((item, index) => (
                   <button
                     key={index}
                     onClick={() => handleInsertValue(item)}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, item)}
+                    onDragEnd={handleDragEnd}
                     className="flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 p-4 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm"
                   >
                     <span className="text-sm font-bold text-slate-700 group-hover:text-blue-600 truncate">{item}</span>
