@@ -58,6 +58,28 @@ const getCaretRangeFromPoint = (x, y) => {
   return null;
 };
 
+const getNearestWordBoundary = (text, offset) => {
+  const safeOffset = Math.max(0, Math.min(offset, text.length));
+  const boundaries = new Set([0, text.length]);
+
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+    for (const segment of segmenter.segment(text)) {
+      boundaries.add(segment.index);
+      boundaries.add(segment.index + segment.segment.length);
+    }
+  } else {
+    const matcher = /\s+|[.,;:!?()[\]{}\-\/]+/g;
+    let match;
+    while ((match = matcher.exec(text)) !== null) {
+      boundaries.add(match.index);
+      boundaries.add(match.index + match[0].length);
+    }
+  }
+
+  return [...boundaries].sort((a, b) => Math.abs(a - safeOffset) - Math.abs(b - safeOffset))[0];
+};
+
 const App = () => {
   const [contentParts, setContentParts] = useState([
     { type: 'text', value: 'Patient is taking ' },
@@ -105,6 +127,36 @@ const App = () => {
     setReplaceTargetIndex(null);
   };
 
+  const setDOMCaretAtOffset = (target, offset) => {
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+    let remainingOffset = offset;
+    let currentNode = walker.nextNode();
+
+    while (currentNode) {
+      const nodeLength = currentNode.textContent?.length ?? 0;
+      if (remainingOffset <= nodeLength) {
+        const range = document.createRange();
+        range.setStart(currentNode, remainingOffset);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return;
+      }
+
+      remainingOffset -= nodeLength;
+      currentNode = walker.nextNode();
+    }
+
+    const fallbackRange = document.createRange();
+    fallbackRange.selectNodeContents(target);
+    fallbackRange.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(fallbackRange);
+  };
+
   const syncTextSelectionFromDOM = (target, index) => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || !target.contains(selection.anchorNode)) {
@@ -118,17 +170,16 @@ const App = () => {
   const setCaretFromPoint = (target, index, x, y) => {
     const range = getCaretRangeFromPoint(x, y);
     if (!range || !target.contains(range.startContainer)) {
-      setTextSelection(index, target.innerText.length);
+      const snappedOffset = getNearestWordBoundary(target.innerText, target.innerText.length);
+      setDOMCaretAtOffset(target, snappedOffset);
+      setTextSelection(index, snappedOffset);
       return;
     }
 
-    const selection = window.getSelection();
-    if (selection) {
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
-
-    setTextSelection(index, getRangeOffsetWithinTarget(target, range));
+    const rawOffset = getRangeOffsetWithinTarget(target, range);
+    const snappedOffset = getNearestWordBoundary(target.innerText, rawOffset);
+    setDOMCaretAtOffset(target, snappedOffset);
+    setTextSelection(index, snappedOffset);
   };
 
   const updateContentParts = (nextParts, nextSelection = null) => {
@@ -292,6 +343,7 @@ const App = () => {
 
   const handleTextDragOver = (e, index) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = dragPayload?.type === 'bubble' ? 'move' : 'copy';
     setCaretFromPoint(e.currentTarget, index, e.clientX, e.clientY);
     setIsDraggingOverEditor(true);
@@ -299,6 +351,7 @@ const App = () => {
 
   const handleInlineBoundaryDragOver = (e, index, allowReplace = false) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = dragPayload?.type === 'bubble' ? 'move' : 'copy';
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -461,7 +514,7 @@ const App = () => {
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
             {dragPayload && (
               <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
-                Dragging over text will place the caret directly between characters
+                Dragging over text will snap the caret to the nearest word boundary
               </p>
             )}
             <div className="grid grid-cols-2 gap-2 pb-4">
