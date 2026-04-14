@@ -82,11 +82,11 @@ const getNearestWordBoundary = (text, offset) => {
 
 const App = () => {
   const [contentParts, setContentParts] = useState([
-    { type: 'text', value: 'Patient is taking ' },
-    { type: 'placeholder', value: 'medication', category: 'medication' },
-    { type: 'text', value: ' 500mg, documented by ' },
-    { type: 'placeholder', value: 'nurse', category: 'personnel' },
-    { type: 'text', value: ' in the nursing note.' },
+    { type: 'text', value: '個案目前使用 ' },
+    { type: 'placeholder', value: '藥物名稱', category: 'medication' },
+    { type: 'text', value: ' 500mg，由 ' },
+    { type: 'placeholder', value: '護理人員', category: 'personnel' },
+    { type: 'text', value: ' 記錄於護理紀錄中。' },
   ]);
 
   const [activeCategory, setActiveCategory] = useState(null);
@@ -96,17 +96,57 @@ const App = () => {
   const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
 
   const categories = [
-    { id: 'personnel', label: 'Personnel', icon: <Users size={16} />, color: 'blue' },
-    { id: 'medication', label: 'Medication', icon: <Pill size={16} />, color: 'emerald' },
-    { id: 'terms', label: 'Terms', icon: <Activity size={16} />, color: 'purple' },
-    { id: 'templates', label: 'Templates', icon: <ClipboardList size={16} />, color: 'orange' },
+    { id: 'personnel', label: '護理人員', icon: <Users size={16} />, color: 'blue' },
+    { id: 'medication', label: '藥物', icon: <Pill size={16} />, color: 'emerald' },
+    { id: 'terms', label: '醫療術語', icon: <Activity size={16} />, color: 'purple' },
+    { id: 'templates', label: '常用模板', icon: <ClipboardList size={16} />, color: 'orange' },
   ];
 
   const itemsData = {
-    personnel: ['Wang RN', 'Chen RN', 'Lin RN', 'Chang RN', 'Lee RN'],
-    medication: ['Acetaminophen', 'Morphine', 'Aspirin', 'Normal Saline', 'Insulin', 'Ketorolac'],
-    terms: ['NPO', 'Foley', 'EKG', 'Vital Signs', 'Hyperglycemia', 'S/P'],
-    templates: ['Shift Note', 'Medication Note', 'Pain Assessment', 'Nursing Summary', 'Vital Signs'],
+    personnel: [
+      '王小美護理師',
+      '陳怡君護理師',
+      '林志宏護理師',
+      '張雅婷護理師',
+      '李佩珊護理師',
+      '蔡宜庭護理師',
+      '黃柏翰護理師',
+      '吳欣蓉護理師',
+    ],
+    medication: [
+      'Acetaminophen',
+      'Morphine',
+      'Aspirin',
+      'Normal Saline',
+      'Insulin',
+      'Ketorolac',
+      'Ampicillin',
+      'Metformin',
+      'Lasix',
+      'Plavix',
+    ],
+    terms: [
+      'NPO',
+      'Foley',
+      'EKG',
+      'Vital Signs',
+      'Hyperglycemia',
+      'S/P',
+      'SOB',
+      'I/O',
+      'PRN',
+      'Ambulation',
+    ],
+    templates: [
+      '交班紀錄',
+      '給藥紀錄',
+      '疼痛評估',
+      '護理摘要',
+      '生命徵象紀錄',
+      '跌倒風險評估',
+      '傷口照護紀錄',
+      '衛教紀錄',
+    ],
   };
 
   const getCurrentSelectionTarget = (parts = contentParts) =>
@@ -391,12 +431,12 @@ const App = () => {
             <Sparkles size={18} className="text-blue-400" />
           </div>
           <div>
-            <h1 className="text-lg font-black text-slate-900 leading-none tracking-tight">Nursing Speech Assistant</h1>
+            <h1 className="text-lg font-black text-slate-900 leading-none tracking-tight">護理語音助手</h1>
             <p className="text-[10px] text-blue-500 font-bold uppercase mt-1 tracking-widest">AI Speech Assistant</p>
           </div>
         </div>
         <button className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all">
-          Save
+          儲存
         </button>
       </header>
 
@@ -485,7 +525,7 @@ const App = () => {
 
           <div className="mt-auto pt-6 flex justify-between items-center text-slate-300 pointer-events-none">
             <span className="text-[10px] font-bold tracking-widest uppercase">
-              Drag or click an item to insert it at the current caret position
+              可直接拖曳或點選下方項目，插入到目前游標位置
             </span>
             <button onClick={() => window.location.reload()} className="pointer-events-auto hover:text-slate-500">
               <RotateCcw size={16} />
@@ -512,9 +552,14 @@ const App = () => {
 
         <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-64 opacity-100' : 'h-0 opacity-0'}`}>
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
+            {activeCategory && (
+              <p className="mb-3 text-xs font-bold tracking-wide text-slate-500">
+                點選可直接插入，拖曳可放到文本中的指定位置
+              </p>
+            )}
             {dragPayload && (
               <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
-                Dragging over text will snap the caret to the nearest word boundary
+                拖曳到文字上方時，會自動吸附到最近的詞界線
               </p>
             )}
             <div className="grid grid-cols-2 gap-2 pb-4">
@@ -526,7 +571,7 @@ const App = () => {
                     draggable
                     onDragStart={(e) => handleListItemDragStart(e, item)}
                     onDragEnd={handleDragEnd}
-                    className="flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 p-4 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm"
+                    className="flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 p-4 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing"
                   >
                     <span className="text-sm font-bold text-slate-700 group-hover:text-blue-600 truncate">{item}</span>
                     <div className="w-6 h-6 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
@@ -545,7 +590,7 @@ const App = () => {
           className={`flex flex-col items-center gap-1 transition-opacity ${activeCategory === 'templates' ? 'opacity-100 text-orange-500' : 'opacity-40 text-slate-500'}`}
         >
           <ClipboardList size={20} />
-          <span className="text-[9px] font-bold uppercase">Templates</span>
+          <span className="text-[9px] font-bold uppercase">模板</span>
         </button>
 
         <button className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center text-white shadow-xl active:scale-90 transition-transform -mt-10 border-[6px] border-slate-50 relative group">
@@ -558,7 +603,7 @@ const App = () => {
           className={`flex flex-col items-center gap-1 transition-opacity ${activeCategory === 'personnel' ? 'opacity-100 text-blue-500' : 'opacity-40 text-slate-500'}`}
         >
           <Users size={20} />
-          <span className="text-[9px] font-bold uppercase">Staff</span>
+          <span className="text-[9px] font-bold uppercase">人員</span>
         </button>
       </div>
 
