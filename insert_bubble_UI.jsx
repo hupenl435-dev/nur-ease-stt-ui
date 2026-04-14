@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Mic,
   RotateCcw,
@@ -10,6 +10,8 @@ import {
   PlusCircle,
   Sparkles,
 } from 'lucide-react';
+
+const TOUCH_DRAG_THRESHOLD = 8;
 
 const normalizeParts = (parts) => {
   const normalized = [];
@@ -63,7 +65,7 @@ const getNearestWordBoundary = (text, offset) => {
   const boundaries = new Set([0, text.length]);
 
   if (typeof Intl !== 'undefined' && Intl.Segmenter) {
-    const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+    const segmenter = new Intl.Segmenter('zh-Hant', { granularity: 'word' });
     for (const segment of segmenter.segment(text)) {
       boundaries.add(segment.index);
       boundaries.add(segment.index + segment.segment.length);
@@ -82,7 +84,7 @@ const getNearestWordBoundary = (text, offset) => {
 
 const App = () => {
   const [contentParts, setContentParts] = useState([
-    { type: 'text', value: '個案目前使用 ' },
+    { type: 'text', value: '病人目前使用 ' },
     { type: 'placeholder', value: '藥物名稱', category: 'medication' },
     { type: 'text', value: ' 500mg，由 ' },
     { type: 'placeholder', value: '護理人員', category: 'personnel' },
@@ -94,12 +96,18 @@ const App = () => {
   const [replaceTargetIndex, setReplaceTargetIndex] = useState(null);
   const [dragPayload, setDragPayload] = useState(null);
   const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
+  const [caretIndicator, setCaretIndicator] = useState(null);
+  const [touchPreview, setTouchPreview] = useState(null);
+
+  const editorRef = useRef(null);
+  const flowRef = useRef(null);
+  const touchDragRef = useRef(null);
 
   const categories = [
-    { id: 'personnel', label: '護理人員', icon: <Users size={16} />, color: 'blue' },
-    { id: 'medication', label: '藥物', icon: <Pill size={16} />, color: 'emerald' },
-    { id: 'terms', label: '醫療術語', icon: <Activity size={16} />, color: 'purple' },
-    { id: 'templates', label: '常用模板', icon: <ClipboardList size={16} />, color: 'orange' },
+    { id: 'personnel', label: '護理人員', icon: <Users size={16} /> },
+    { id: 'medication', label: '藥物', icon: <Pill size={16} /> },
+    { id: 'terms', label: '醫療術語', icon: <Activity size={16} /> },
+    { id: 'templates', label: '常用模板', icon: <ClipboardList size={16} /> },
   ];
 
   const itemsData = {
@@ -152,9 +160,50 @@ const App = () => {
   const getCurrentSelectionTarget = (parts = contentParts) =>
     selectionTarget ?? { type: 'between', index: parts.length };
 
+  const clearVisualIndicator = () => {
+    setCaretIndicator(null);
+    setTouchPreview(null);
+  };
+
   const clearDragState = () => {
     setDragPayload(null);
     setIsDraggingOverEditor(false);
+    clearVisualIndicator();
+  };
+
+  const updateIndicatorFromRange = (range) => {
+    if (!editorRef.current || !range) return;
+
+    const editorRect = editorRef.current.getBoundingClientRect();
+    const rect = range.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.left === 0)) return;
+
+    setCaretIndicator({
+      left: rect.left - editorRect.left + editorRef.current.scrollLeft,
+      top: rect.top - editorRect.top + editorRef.current.scrollTop,
+      height: Math.max(rect.height, 28),
+    });
+  };
+
+  const updateIndicatorFromElementEdge = (element, placeAfter) => {
+    if (!editorRef.current || !element) return;
+
+    const editorRect = editorRef.current.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
+    setCaretIndicator({
+      left: (placeAfter ? rect.right : rect.left) - editorRect.left + editorRef.current.scrollLeft,
+      top: rect.top - editorRect.top + editorRef.current.scrollTop,
+      height: Math.max(rect.height, 28),
+    });
+  };
+
+  const updateIndicatorAtFlowEnd = () => {
+    if (!flowRef.current) return;
+
+    const range = document.createRange();
+    range.selectNodeContents(flowRef.current);
+    range.collapse(false);
+    updateIndicatorFromRange(range);
   };
 
   const setBetweenSelection = (index) => {
@@ -183,6 +232,7 @@ const App = () => {
         range.collapse(true);
         selection.removeAllRanges();
         selection.addRange(range);
+        updateIndicatorFromRange(range);
         return;
       }
 
@@ -195,6 +245,7 @@ const App = () => {
     fallbackRange.collapse(false);
     selection.removeAllRanges();
     selection.addRange(fallbackRange);
+    updateIndicatorFromRange(fallbackRange);
   };
 
   const syncTextSelectionFromDOM = (target, index) => {
@@ -356,10 +407,44 @@ const App = () => {
     removePartAtIndex(index);
   };
 
+  const updateDropTargetFromPoint = (clientX, clientY, payloadType) => {
+    const element = document.elementFromPoint(clientX, clientY);
+    if (!element) return;
+
+    const textTarget = element.closest('[data-drop-kind="text"]');
+    if (textTarget) {
+      const index = Number(textTarget.dataset.textIndex);
+      setCaretFromPoint(textTarget, index, clientX, clientY);
+      setIsDraggingOverEditor(true);
+      return;
+    }
+
+    const boundaryTarget = element.closest('[data-drop-kind="boundary"]');
+    if (boundaryTarget) {
+      const index = Number(boundaryTarget.dataset.partIndex);
+      const rect = boundaryTarget.getBoundingClientRect();
+      const shouldInsertAfter = clientX > rect.left + rect.width / 2;
+      const boundaryIndex = index + (shouldInsertAfter ? 1 : 0);
+      const canReplace = boundaryTarget.dataset.replaceable === 'true' && payloadType !== 'bubble';
+
+      setSelectionTarget({ type: 'between', index: boundaryIndex });
+      setReplaceTargetIndex(canReplace ? index : null);
+      updateIndicatorFromElementEdge(boundaryTarget, shouldInsertAfter);
+      setIsDraggingOverEditor(true);
+      return;
+    }
+
+    if (editorRef.current?.contains(element)) {
+      setBetweenSelection(contentParts.length);
+      updateIndicatorAtFlowEnd();
+      setIsDraggingOverEditor(true);
+    }
+  };
+
   const handleListItemDragStart = (e, item) => {
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('text/plain', item);
-    setDragPayload({ type: 'library-item', value: item });
+    setDragPayload({ type: 'library-item', value: item, category: activeCategory });
   };
 
   const handleBubbleDragStart = (e, index, part) => {
@@ -376,8 +461,8 @@ const App = () => {
   const handleEditorDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = dragPayload?.type === 'bubble' ? 'move' : 'copy';
-    setSelectionTarget({ type: 'between', index: contentParts.length });
-    setReplaceTargetIndex(null);
+    setBetweenSelection(contentParts.length);
+    updateIndicatorAtFlowEnd();
     setIsDraggingOverEditor(true);
   };
 
@@ -389,7 +474,7 @@ const App = () => {
     setIsDraggingOverEditor(true);
   };
 
-  const handleInlineBoundaryDragOver = (e, index, allowReplace = false) => {
+  const handleInlineBoundaryDragOver = (e, index, replaceable = false) => {
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = dragPayload?.type === 'bubble' ? 'move' : 'copy';
@@ -399,7 +484,8 @@ const App = () => {
     const boundaryIndex = index + (shouldInsertAfter ? 1 : 0);
 
     setSelectionTarget({ type: 'between', index: boundaryIndex });
-    setReplaceTargetIndex(allowReplace && dragPayload?.type !== 'bubble' ? index : null);
+    setReplaceTargetIndex(replaceable && dragPayload?.type !== 'bubble' ? index : null);
+    updateIndicatorFromElementEdge(e.currentTarget, shouldInsertAfter);
     setIsDraggingOverEditor(true);
   };
 
@@ -415,12 +501,71 @@ const App = () => {
     const droppedValue = e.dataTransfer.getData('text/plain') || dragPayload?.value;
     if (!droppedValue) return;
 
-    insertValueAtSelection(droppedValue);
+    insertValueAtSelection(droppedValue, dragPayload?.category ?? activeCategory);
+  };
+
+  const startTouchDrag = (payload, label, touch) => {
+    touchDragRef.current = {
+      payload,
+      label,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      active: false,
+    };
+  };
+
+  const handleTouchMove = (e) => {
+    const session = touchDragRef.current;
+    if (!session) return;
+
+    const touch = e.touches[0];
+    if (!touch) return;
+
+    const distance = Math.hypot(touch.clientX - session.startX, touch.clientY - session.startY);
+    if (!session.active && distance < TOUCH_DRAG_THRESHOLD) return;
+
+    session.active = true;
+    e.preventDefault();
+
+    if (!dragPayload) {
+      setDragPayload(session.payload);
+    }
+
+    setTouchPreview({
+      x: touch.clientX,
+      y: touch.clientY,
+      label: session.label,
+    });
+    updateDropTargetFromPoint(touch.clientX, touch.clientY, session.payload.type);
+  };
+
+  const handleTouchEnd = (e) => {
+    const session = touchDragRef.current;
+    if (!session) return;
+
+    if (session.active) {
+      e.preventDefault();
+
+      if (session.payload.type === 'bubble') {
+        moveBubbleToSelection(session.payload.index);
+      } else {
+        insertValueAtSelection(session.payload.value, session.payload.category ?? activeCategory);
+      }
+    }
+
+    touchDragRef.current = null;
+    clearDragState();
+  };
+
+  const handleTouchCancel = () => {
+    touchDragRef.current = null;
+    clearDragState();
   };
 
   const handleEditorDragLeave = (e) => {
     if (e.currentTarget.contains(e.relatedTarget)) return;
     setIsDraggingOverEditor(false);
+    clearVisualIndicator();
   };
 
   return (
@@ -442,25 +587,52 @@ const App = () => {
 
       <main className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
         <div
+          ref={editorRef}
           className={`flex-1 bg-white rounded-[2rem] p-6 shadow-sm border flex flex-col relative overflow-y-auto transition-colors ${
             isDraggingOverEditor ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200'
           }`}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setBetweenSelection(contentParts.length);
+              updateIndicatorAtFlowEnd();
             }
           }}
           onDragOver={handleEditorDragOver}
           onDragLeave={handleEditorDragLeave}
           onDrop={handleDrop}
         >
-          <div className="leading-[2.2] text-lg font-medium text-slate-700 whitespace-pre-wrap break-words">
+          {caretIndicator && (
+            <div
+              className="pointer-events-none absolute z-20 w-[3px] rounded-full bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.18)]"
+              style={{
+                left: `${caretIndicator.left - 1.5}px`,
+                top: `${caretIndicator.top - 2}px`,
+                height: `${caretIndicator.height + 4}px`,
+              }}
+            />
+          )}
+
+          {touchPreview && (
+            <div
+              className="pointer-events-none fixed z-30 -translate-x-1/2 -translate-y-full rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white shadow-xl opacity-90"
+              style={{ left: touchPreview.x, top: touchPreview.y - 12 }}
+            >
+              {touchPreview.label}
+            </div>
+          )}
+
+          <div
+            ref={flowRef}
+            className="leading-[2.2] text-lg font-medium text-slate-700 whitespace-pre-wrap break-words"
+          >
             {contentParts.map((part, index) => (
               <React.Fragment key={index}>
                 {part.type === 'text' ? (
                   <span
                     contentEditable
                     suppressContentEditableWarning
+                    data-drop-kind="text"
+                    data-text-index={index}
                     onFocus={(e) => syncTextSelectionFromDOM(e.currentTarget, index)}
                     onClick={(e) => syncTextSelectionFromDOM(e.currentTarget, index)}
                     onKeyUp={(e) => syncTextSelectionFromDOM(e.currentTarget, index)}
@@ -477,6 +649,9 @@ const App = () => {
                   <button
                     type="button"
                     draggable
+                    data-drop-kind="boundary"
+                    data-part-index={index}
+                    data-replaceable="false"
                     onClick={() => {
                       setReplaceTargetIndex(index);
                       setSelectionTarget({ type: 'between', index });
@@ -488,10 +663,14 @@ const App = () => {
                     }}
                     onDragStart={(e) => handleBubbleDragStart(e, index, part)}
                     onDragEnd={handleDragEnd}
+                    onTouchStart={(e) => startTouchDrag({ type: 'bubble', value: part.value, index, category: part.category }, part.value, e.touches[0])}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    onTouchCancel={handleTouchCancel}
                     onKeyDown={(e) => handleBubbleKeyDown(e, index)}
                     onDragOver={(e) => handleInlineBoundaryDragOver(e, index)}
                     onDrop={handleDrop}
-                    className={`mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border items-center transition-all shadow-sm ${
+                    className={`drag-chip mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border items-center transition-all shadow-sm ${
                       replaceTargetIndex === index
                         ? 'border-blue-500 bg-blue-600 text-white scale-105'
                         : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
@@ -502,6 +681,9 @@ const App = () => {
                 ) : (
                   <button
                     type="button"
+                    data-drop-kind="boundary"
+                    data-part-index={index}
+                    data-replaceable="true"
                     onClick={() => {
                       setReplaceTargetIndex(index);
                       setSelectionTarget({ type: 'between', index });
@@ -509,7 +691,7 @@ const App = () => {
                     }}
                     onDragOver={(e) => handleInlineBoundaryDragOver(e, index, true)}
                     onDrop={handleDrop}
-                    className={`mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border-2 border-dashed items-center gap-1 transition-all ${
+                    className={`drag-chip mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border-2 border-dashed items-center gap-1 transition-all ${
                       replaceTargetIndex === index
                         ? 'border-blue-500 bg-blue-50 text-blue-600 scale-105 shadow-sm'
                         : 'border-slate-300 bg-slate-50 text-slate-500 animate-pulse'
@@ -550,14 +732,14 @@ const App = () => {
           ))}
         </div>
 
-        <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-64 opacity-100' : 'h-0 opacity-0'}`}>
+        <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-72 opacity-100' : 'h-0 opacity-0'}`}>
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
             {activeCategory && (
               <p className="mb-3 text-xs font-bold tracking-wide text-slate-500">
                 點選可直接插入，拖曳可放到文本中的指定位置
               </p>
             )}
-            {dragPayload && (
+            {(dragPayload || touchPreview) && (
               <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
                 拖曳到文字上方時，會自動吸附到最近的詞界線
               </p>
@@ -567,11 +749,16 @@ const App = () => {
                 itemsData[activeCategory].map((item, index) => (
                   <button
                     key={index}
-                    onClick={() => handleInsertValue(item)}
+                    type="button"
                     draggable
+                    onClick={() => handleInsertValue(item)}
                     onDragStart={(e) => handleListItemDragStart(e, item)}
                     onDragEnd={handleDragEnd}
-                    className="flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 p-4 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing"
+                    onTouchStart={(e) => startTouchDrag({ type: 'library-item', value: item, category: activeCategory }, item, e.touches[0])}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    onTouchCancel={handleTouchCancel}
+                    className="drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 p-4 rounded-2xl border border-transparent hover:shadow-md transition-all group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing"
                   >
                     <span className="text-sm font-bold text-slate-700 group-hover:text-blue-600 truncate">{item}</span>
                     <div className="w-6 h-6 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
@@ -612,6 +799,13 @@ const App = () => {
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         [contenteditable]:empty:before {
           content: "\\FEFF";
+        }
+        .drag-chip {
+          -webkit-user-select: none;
+          user-select: none;
+          -webkit-touch-callout: none;
+          touch-action: none;
+          -webkit-user-drag: element;
         }
       `}</style>
     </div>
