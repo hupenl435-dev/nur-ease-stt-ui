@@ -12,6 +12,9 @@ import {
 } from 'lucide-react';
 
 const TOUCH_DRAG_THRESHOLD = 8;
+const FLOW_END_MARKER = '\u200B';
+
+const isInlineChip = (part) => part?.type === 'bubble' || part?.type === 'placeholder';
 
 const normalizeParts = (parts) => {
   const normalized = [];
@@ -98,9 +101,11 @@ const App = () => {
   const [dragMode, setDragMode] = useState(null);
   const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
   const [caretIndicator, setCaretIndicator] = useState(null);
+  const [touchPreview, setTouchPreview] = useState(null);
 
   const editorRef = useRef(null);
   const flowRef = useRef(null);
+  const flowEndRef = useRef(null);
   const touchDragRef = useRef(null);
 
   const categories = [
@@ -168,6 +173,7 @@ const App = () => {
     setDragPayload(null);
     setDragMode(null);
     setIsDraggingOverEditor(false);
+    setTouchPreview(null);
     clearVisualIndicator();
   };
 
@@ -198,6 +204,11 @@ const App = () => {
   };
 
   const updateIndicatorAtFlowEnd = () => {
+    if (flowEndRef.current) {
+      updateIndicatorFromElementEdge(flowEndRef.current, false);
+      return;
+    }
+
     if (!flowRef.current) return;
 
     const range = document.createRange();
@@ -214,6 +225,27 @@ const App = () => {
   const setTextSelection = (index, offset) => {
     setSelectionTarget({ type: 'text', index, offset });
     setReplaceTargetIndex(null);
+  };
+
+  const focusFlowEndAnchor = () => {
+    const anchor = flowEndRef.current;
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    if (!anchor) {
+      setBetweenSelection(contentParts.length);
+      updateIndicatorAtFlowEnd();
+      return;
+    }
+
+    anchor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    setBetweenSelection(contentParts.length);
+    updateIndicatorAtFlowEnd();
   };
 
   const setDOMCaretAtOffset = (target, offset) => {
@@ -322,9 +354,12 @@ const App = () => {
     return target;
   };
 
-  const removePartAtIndex = (targetIndex) => {
+  const removePartAtIndex = (targetIndex, nextSelection = null) => {
     const nextParts = contentParts.filter((_, index) => index !== targetIndex);
-    updateContentParts(nextParts, { type: 'between', index: Math.max(0, targetIndex - 1) });
+    updateContentParts(
+      nextParts,
+      nextSelection ?? { type: 'between', index: Math.max(0, targetIndex - 1) },
+    );
   };
 
   const insertValueAtSelection = (
@@ -357,7 +392,7 @@ const App = () => {
     const nextParts = [...contentParts];
     const [movedBubble] = nextParts.splice(sourceIndex, 1);
     const adjustedTarget = adjustTargetAfterBubbleMove(getCurrentSelectionTarget(nextParts), sourceIndex);
-    const insertedIndex = insertBubbleIntoParts(nextParts, { ...movedBubble, isNew: false }, adjustedTarget);
+    const insertedIndex = insertBubbleIntoParts(nextParts, { ...movedBubble, isNew: true }, adjustedTarget);
 
     updateContentParts(nextParts, { type: 'between', index: insertedIndex + 1 });
   };
@@ -385,13 +420,13 @@ const App = () => {
     const previousPart = contentParts[index - 1];
     const nextPart = contentParts[index + 1];
 
-    if (e.key === 'Backspace' && caretOffset === 0 && previousPart?.type === 'bubble') {
+    if (e.key === 'Backspace' && caretOffset === 0 && isInlineChip(previousPart)) {
       e.preventDefault();
       removePartAtIndex(index - 1);
       return;
     }
 
-    if (e.key === 'Delete' && caretOffset === currentValueLength && nextPart?.type === 'bubble') {
+    if (e.key === 'Delete' && caretOffset === currentValueLength && isInlineChip(nextPart)) {
       e.preventDefault();
       removePartAtIndex(index + 1);
       return;
@@ -407,16 +442,51 @@ const App = () => {
     removePartAtIndex(index);
   };
 
+  const handleFlowEndKeyDown = (e) => {
+    if (e.key === 'Backspace' && isInlineChip(contentParts[contentParts.length - 1])) {
+      e.preventDefault();
+      removePartAtIndex(contentParts.length - 1, {
+        type: 'between',
+        index: Math.max(contentParts.length - 1, 0),
+      });
+      return;
+    }
+
+    if (e.key === 'Delete') {
+      e.preventDefault();
+      return;
+    }
+
+    if (
+      !['Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)
+      && !e.metaKey
+      && !e.ctrlKey
+      && !e.altKey
+    ) {
+      e.preventDefault();
+    }
+  };
+
+  const syncFlowEndSelection = () => {
+    setBetweenSelection(contentParts.length);
+    updateIndicatorAtFlowEnd();
+  };
+
   const updateDropTargetFromPoint = (clientX, clientY, payloadType) => {
     const element = document.elementFromPoint(clientX, clientY);
-    if (!element) return;
+    if (!element) {
+      setIsDraggingOverEditor(false);
+      setReplaceTargetIndex(null);
+      clearVisualIndicator();
+      return false;
+    }
 
     const textTarget = element.closest('[data-drop-kind="text"]');
     if (textTarget) {
       const index = Number(textTarget.dataset.textIndex);
       setCaretFromPoint(textTarget, index, clientX, clientY);
       setIsDraggingOverEditor(true);
-      return;
+      return true;
     }
 
     const boundaryTarget = element.closest('[data-drop-kind="boundary"]');
@@ -431,14 +501,20 @@ const App = () => {
       setReplaceTargetIndex(canReplace ? index : null);
       updateIndicatorFromElementEdge(boundaryTarget, shouldInsertAfter);
       setIsDraggingOverEditor(true);
-      return;
+      return true;
     }
 
     if (editorRef.current?.contains(element)) {
       setBetweenSelection(contentParts.length);
       updateIndicatorAtFlowEnd();
       setIsDraggingOverEditor(true);
+      return true;
     }
+
+    setIsDraggingOverEditor(false);
+    setReplaceTargetIndex(null);
+    clearVisualIndicator();
+    return false;
   };
 
   const handleListItemDragStart = (e, item) => {
@@ -512,6 +588,7 @@ const App = () => {
       startX: touch.clientX,
       startY: touch.clientY,
       active: false,
+      isOverEditor: false,
     };
   };
 
@@ -532,14 +609,29 @@ const App = () => {
       setDragMode('touch');
       setDragPayload(session.payload);
     }
-    updateDropTargetFromPoint(touch.clientX, touch.clientY, session.payload.type);
+    setTouchPreview({
+      x: touch.clientX,
+      y: touch.clientY,
+      category: session.payload.category,
+      value: session.payload.value,
+    });
+    session.isOverEditor = updateDropTargetFromPoint(touch.clientX, touch.clientY, session.payload.type);
   };
 
   const handleTouchEnd = (e) => {
     const session = touchDragRef.current;
     if (!session) return;
 
-    if (session.active) {
+    const touch = e.changedTouches[0];
+    if (touch) {
+      session.isOverEditor = updateDropTargetFromPoint(
+        touch.clientX,
+        touch.clientY,
+        session.payload.type,
+      );
+    }
+
+    if (session.active && session.isOverEditor) {
       e.preventDefault();
 
       if (session.payload.type === 'bubble') {
@@ -570,6 +662,9 @@ const App = () => {
   const isTouchDraggingListItem = (item) =>
     dragMode === 'touch' && dragPayload?.type === 'library-item' && dragPayload.value === item;
 
+  const showFlowEndAnchor =
+    contentParts.length === 0 || isInlineChip(contentParts[contentParts.length - 1]);
+
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans max-w-md mx-auto border-x shadow-2xl overflow-hidden relative text-slate-800">
       <header className="px-5 py-4 flex justify-between items-center bg-white border-b z-10 shadow-sm">
@@ -595,8 +690,7 @@ const App = () => {
           }`}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-              setBetweenSelection(contentParts.length);
-              updateIndicatorAtFlowEnd();
+              focusFlowEndAnchor();
             }
           }}
           onDragOver={handleEditorDragOver}
@@ -621,6 +715,11 @@ const App = () => {
           <div
             ref={flowRef}
             className="leading-[2.2] text-lg font-medium text-slate-700 whitespace-pre-wrap break-words"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                focusFlowEndAnchor();
+              }
+            }}
           >
             {contentParts.map((part, index) => (
               <React.Fragment key={index}>
@@ -673,7 +772,7 @@ const App = () => {
                         : replaceTargetIndex === index
                         ? 'border-blue-500 bg-blue-600 text-white scale-105'
                         : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
-                    }`}
+                    } ${part.isNew ? 'bubble-pop' : ''}`}
                   >
                     <span className={`font-bold ${isTouchDraggingBubble(index) ? 'text-[0px]' : 'text-sm'}`}>
                       {part.value}
@@ -704,6 +803,26 @@ const App = () => {
                 )}
               </React.Fragment>
             ))}
+            {showFlowEndAnchor && (
+              <span
+                ref={flowEndRef}
+                contentEditable
+                suppressContentEditableWarning
+                spellCheck={false}
+                onFocus={syncFlowEndSelection}
+                onClick={syncFlowEndSelection}
+                onMouseUp={syncFlowEndSelection}
+                onKeyUp={syncFlowEndSelection}
+                onKeyDown={handleFlowEndKeyDown}
+                onBlur={(e) => {
+                  e.currentTarget.textContent = FLOW_END_MARKER;
+                }}
+                className="inline-block min-w-[0.7rem] align-baseline rounded outline-none text-transparent"
+                style={{ caretColor: '#2563eb' }}
+              >
+                {FLOW_END_MARKER}
+              </span>
+            )}
           </div>
 
           <div className="mt-auto pt-6 flex justify-between items-center text-slate-300 pointer-events-none">
@@ -759,18 +878,18 @@ const App = () => {
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     onTouchCancel={handleTouchCancel}
-                    className={`drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 rounded-2xl border border-transparent hover:shadow-md transition-all duration-150 ease-out group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing overflow-hidden ${
+                    className={`drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 rounded-2xl border border-transparent hover:shadow-md transition-all duration-150 ease-out group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing overflow-hidden p-4 ${
                       isTouchDraggingListItem(item)
-                        ? 'h-2 w-8 px-0 py-0 rounded-full opacity-85 border-0 bg-blue-400 shadow-none'
-                        : 'p-4'
+                        ? 'border-blue-200 bg-blue-50/80 opacity-45 scale-[0.98]'
+                        : ''
                     }`}
                   >
-                    <span className={`font-bold text-slate-700 group-hover:text-blue-600 truncate ${isTouchDraggingListItem(item) ? 'text-[0px]' : 'text-sm'}`}>
+                    <span className="font-bold text-sm text-slate-700 group-hover:text-blue-600 truncate">
                       {item}
                     </span>
                     <div className={`rounded-full bg-slate-50 flex items-center justify-center transition-colors ${
                       isTouchDraggingListItem(item)
-                        ? 'w-0 h-0 overflow-hidden opacity-0'
+                        ? 'w-6 h-6 opacity-0'
                         : 'w-6 h-6 group-hover:bg-blue-600 group-hover:text-white'
                     }`}>
                       <Check size={12} className="opacity-0 group-hover:opacity-100" />
@@ -781,6 +900,17 @@ const App = () => {
           </div>
         </div>
       </main>
+
+      {touchPreview && dragMode === 'touch' && (
+        <div
+          className="pointer-events-none fixed z-30 h-2.5 w-12 rounded-full bg-blue-500/90 shadow-[0_10px_30px_rgba(37,99,235,0.28)]"
+          style={{
+            left: `${touchPreview.x}px`,
+            top: `${touchPreview.y - 24}px`,
+            transform: 'translate(-50%, -50%)',
+          }}
+        />
+      )}
 
       <div className="h-24 bg-white border-t flex items-center justify-center gap-12 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] z-10">
         <button
@@ -817,6 +947,20 @@ const App = () => {
           -webkit-touch-callout: none;
           touch-action: none;
           -webkit-user-drag: element;
+        }
+        .bubble-pop {
+          animation: bubble-expand 180ms ease-out;
+          transform-origin: center;
+        }
+        @keyframes bubble-expand {
+          0% {
+            opacity: 0.55;
+            transform: scaleX(0.42) scaleY(0.38);
+          }
+          100% {
+            opacity: 1;
+            transform: scaleX(1) scaleY(1);
+          }
         }
       `}</style>
     </div>
