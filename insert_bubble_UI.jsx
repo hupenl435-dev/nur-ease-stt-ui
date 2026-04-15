@@ -4,11 +4,12 @@ import {
   RotateCcw,
   Users,
   ClipboardList,
-  Activity,
   Pill,
   Check,
   PlusCircle,
   Sparkles,
+  FileText,
+  Settings,
 } from 'lucide-react';
 
 const TOUCH_DRAG_THRESHOLD = 8;
@@ -85,47 +86,49 @@ const getNearestWordBoundary = (text, offset) => {
   return [...boundaries].sort((a, b) => Math.abs(a - safeOffset) - Math.abs(b - safeOffset))[0];
 };
 
-const App = () => {
-  const [contentParts, setContentParts] = useState([
-    { type: 'text', value: '病人目前使用 ' },
-    { type: 'placeholder', value: '藥物名稱', category: 'medication' },
-    { type: 'text', value: ' 500mg，由 ' },
-    { type: 'placeholder', value: '護理人員', category: 'personnel' },
-    { type: 'text', value: ' 記錄於護理紀錄中。' },
-  ]);
+const surnamePool = ['王', '李', '陳', '林', '張', '黃', '吳', '劉', '蔡', '楊', '鄭', '謝'];
+const givenNamePool = [
+  '品妤',
+  '冠廷',
+  '怡安',
+  '柏翰',
+  '宥辰',
+  '語彤',
+  '承恩',
+  '佳穎',
+  '子涵',
+  '詠晴',
+  '嘉宏',
+  '思妤',
+  '品睿',
+  '雅筑',
+  '昱廷',
+  '芷瑄',
+];
 
-  const [activeCategory, setActiveCategory] = useState(null);
-  const [selectionTarget, setSelectionTarget] = useState(null);
-  const [replaceTargetIndex, setReplaceTargetIndex] = useState(null);
-  const [dragPayload, setDragPayload] = useState(null);
-  const [dragMode, setDragMode] = useState(null);
-  const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
-  const [caretIndicator, setCaretIndicator] = useState(null);
-  const [touchPreview, setTouchPreview] = useState(null);
+const createRandomStaffNames = (count, suffix, usedBaseNames) => {
+  const names = [];
 
-  const editorRef = useRef(null);
-  const flowRef = useRef(null);
-  const flowEndRef = useRef(null);
-  const touchDragRef = useRef(null);
+  while (names.length < count) {
+    const baseName = `${surnamePool[Math.floor(Math.random() * surnamePool.length)]}${
+      givenNamePool[Math.floor(Math.random() * givenNamePool.length)]
+    }`;
 
-  const categories = [
-    { id: 'personnel', label: '護理人員', icon: <Users size={16} /> },
-    { id: 'medication', label: '藥物', icon: <Pill size={16} /> },
-    { id: 'terms', label: '醫療術語', icon: <Activity size={16} /> },
-    { id: 'templates', label: '常用模板', icon: <ClipboardList size={16} /> },
-  ];
+    if (usedBaseNames.has(baseName)) continue;
 
-  const itemsData = {
-    personnel: [
-      '王小美護理師',
-      '陳怡君護理師',
-      '林志宏護理師',
-      '張雅婷護理師',
-      '李佩珊護理師',
-      '蔡宜庭護理師',
-      '黃柏翰護理師',
-      '吳欣蓉護理師',
-    ],
+    usedBaseNames.add(baseName);
+    names.push(`${baseName}${suffix}`);
+  }
+
+  return names;
+};
+
+const createItemsData = () => {
+  const usedBaseNames = new Set();
+
+  return {
+    physician: createRandomStaffNames(8, '醫師', usedBaseNames),
+    nursePractitioner: createRandomStaffNames(8, '專科護理師', usedBaseNames),
     medication: [
       'Acetaminophen',
       'Morphine',
@@ -138,32 +141,42 @@ const App = () => {
       'Lasix',
       'Plavix',
     ],
-    terms: [
-      'NPO',
-      'Foley',
-      'EKG',
-      'Vital Signs',
-      'Hyperglycemia',
-      'S/P',
-      'SOB',
-      'I/O',
-      'PRN',
-      'Ambulation',
-    ],
-    templates: [
-      '交班紀錄',
-      '給藥紀錄',
-      '疼痛評估',
-      '護理摘要',
-      '生命徵象紀錄',
-      '跌倒風險評估',
-      '傷口照護紀錄',
-      '衛教紀錄',
-    ],
   };
+};
 
-  const getCurrentSelectionTarget = (parts = contentParts) =>
-    selectionTarget ?? { type: 'between', index: parts.length };
+const App = () => {
+  const [contentParts, setContentParts] = useState([
+    { type: 'text', value: '病人目前使用 ' },
+    { type: 'placeholder', value: '藥物名稱', category: 'medication' },
+    { type: 'text', value: ' 500mg，由 ' },
+    { type: 'placeholder', value: '醫師', category: 'physician' },
+    { type: 'text', value: ' 記錄於護理紀錄中。' },
+  ]);
+
+  const [activeCategory, setActiveCategory] = useState(null);
+  const [selectionTarget, setSelectionTarget] = useState(null);
+  const [replaceTargetIndex, setReplaceTargetIndex] = useState(null);
+  const [dragPayload, setDragPayload] = useState(null);
+  const [dragMode, setDragMode] = useState(null);
+  const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
+  const [caretIndicator, setCaretIndicator] = useState(null);
+  const [touchPreview, setTouchPreview] = useState(null);
+  const [activeShortcut, setActiveShortcut] = useState('record');
+  const [itemsData] = useState(() => createItemsData());
+
+  const editorRef = useRef(null);
+  const flowRef = useRef(null);
+  const flowEndRef = useRef(null);
+  const touchDragRef = useRef(null);
+
+  const categories = [
+    { id: 'physician', label: '醫師', icon: <Users size={16} /> },
+    { id: 'nursePractitioner', label: '專科護理師', icon: <ClipboardList size={16} /> },
+    { id: 'medication', label: '用藥', icon: <Pill size={16} /> },
+  ];
+
+  const getCurrentSelectionTarget = (parts = contentParts, target = selectionTarget) =>
+    target ?? { type: 'between', index: parts.length };
 
   const clearVisualIndicator = () => {
     setCaretIndicator(null);
@@ -296,13 +309,14 @@ const App = () => {
       const snappedOffset = getNearestWordBoundary(target.innerText, target.innerText.length);
       setDOMCaretAtOffset(target, snappedOffset);
       setTextSelection(index, snappedOffset);
-      return;
+      return { type: 'text', index, offset: snappedOffset };
     }
 
     const rawOffset = getRangeOffsetWithinTarget(target, range);
     const snappedOffset = getNearestWordBoundary(target.innerText, rawOffset);
     setDOMCaretAtOffset(target, snappedOffset);
     setTextSelection(index, snappedOffset);
+    return { type: 'text', index, offset: snappedOffset };
   };
 
   const updateContentParts = (nextParts, nextSelection = null) => {
@@ -366,10 +380,11 @@ const App = () => {
     value,
     forcedCategory = activeCategory,
     forcedReplaceIndex = replaceTargetIndex,
+    forcedSelectionTarget = selectionTarget,
   ) => {
     const nextParts = [...contentParts];
     const replaceIndex = forcedReplaceIndex;
-    const selection = getCurrentSelectionTarget(nextParts);
+    const selection = getCurrentSelectionTarget(nextParts, forcedSelectionTarget);
     const replacePart = replaceIndex !== null ? nextParts[replaceIndex] : null;
     const bubbleCategory = forcedCategory || replacePart?.category || null;
     const newBubblePart = { type: 'bubble', value, category: bubbleCategory, isNew: true };
@@ -385,13 +400,16 @@ const App = () => {
     updateContentParts(nextParts, { type: 'between', index: insertedIndex + 1 });
   };
 
-  const moveBubbleToSelection = (sourceIndex) => {
+  const moveBubbleToSelection = (sourceIndex, forcedSelectionTarget = selectionTarget) => {
     const sourcePart = contentParts[sourceIndex];
     if (!sourcePart || sourcePart.type !== 'bubble') return;
 
     const nextParts = [...contentParts];
     const [movedBubble] = nextParts.splice(sourceIndex, 1);
-    const adjustedTarget = adjustTargetAfterBubbleMove(getCurrentSelectionTarget(nextParts), sourceIndex);
+    const adjustedTarget = adjustTargetAfterBubbleMove(
+      getCurrentSelectionTarget(nextParts, forcedSelectionTarget),
+      sourceIndex,
+    );
     const insertedIndex = insertBubbleIntoParts(nextParts, { ...movedBubble, isNew: true }, adjustedTarget);
 
     updateContentParts(nextParts, { type: 'between', index: insertedIndex + 1 });
@@ -478,15 +496,23 @@ const App = () => {
       setIsDraggingOverEditor(false);
       setReplaceTargetIndex(null);
       clearVisualIndicator();
-      return false;
+      return {
+        isOverEditor: false,
+        selectionTarget: null,
+        replaceTargetIndex: null,
+      };
     }
 
     const textTarget = element.closest('[data-drop-kind="text"]');
     if (textTarget) {
       const index = Number(textTarget.dataset.textIndex);
-      setCaretFromPoint(textTarget, index, clientX, clientY);
+      const nextSelectionTarget = setCaretFromPoint(textTarget, index, clientX, clientY);
       setIsDraggingOverEditor(true);
-      return true;
+      return {
+        isOverEditor: true,
+        selectionTarget: nextSelectionTarget,
+        replaceTargetIndex: null,
+      };
     }
 
     const boundaryTarget = element.closest('[data-drop-kind="boundary"]');
@@ -496,25 +522,39 @@ const App = () => {
       const shouldInsertAfter = clientX > rect.left + rect.width / 2;
       const boundaryIndex = index + (shouldInsertAfter ? 1 : 0);
       const canReplace = boundaryTarget.dataset.replaceable === 'true' && payloadType !== 'bubble';
+      const nextSelectionTarget = { type: 'between', index: boundaryIndex };
+      const nextReplaceTargetIndex = canReplace ? index : null;
 
-      setSelectionTarget({ type: 'between', index: boundaryIndex });
-      setReplaceTargetIndex(canReplace ? index : null);
+      setSelectionTarget(nextSelectionTarget);
+      setReplaceTargetIndex(nextReplaceTargetIndex);
       updateIndicatorFromElementEdge(boundaryTarget, shouldInsertAfter);
       setIsDraggingOverEditor(true);
-      return true;
+      return {
+        isOverEditor: true,
+        selectionTarget: nextSelectionTarget,
+        replaceTargetIndex: nextReplaceTargetIndex,
+      };
     }
 
     if (editorRef.current?.contains(element)) {
       setBetweenSelection(contentParts.length);
       updateIndicatorAtFlowEnd();
       setIsDraggingOverEditor(true);
-      return true;
+      return {
+        isOverEditor: true,
+        selectionTarget: { type: 'between', index: contentParts.length },
+        replaceTargetIndex: null,
+      };
     }
 
     setIsDraggingOverEditor(false);
     setReplaceTargetIndex(null);
     clearVisualIndicator();
-    return false;
+    return {
+      isOverEditor: false,
+      selectionTarget: null,
+      replaceTargetIndex: null,
+    };
   };
 
   const handleListItemDragStart = (e, item) => {
@@ -589,6 +629,7 @@ const App = () => {
       startY: touch.clientY,
       active: false,
       isOverEditor: false,
+      dropTarget: null,
     };
   };
 
@@ -615,7 +656,8 @@ const App = () => {
       category: session.payload.category,
       value: session.payload.value,
     });
-    session.isOverEditor = updateDropTargetFromPoint(touch.clientX, touch.clientY, session.payload.type);
+    session.dropTarget = updateDropTargetFromPoint(touch.clientX, touch.clientY, session.payload.type);
+    session.isOverEditor = session.dropTarget.isOverEditor;
   };
 
   const handleTouchEnd = (e) => {
@@ -624,20 +666,26 @@ const App = () => {
 
     const touch = e.changedTouches[0];
     if (touch) {
-      session.isOverEditor = updateDropTargetFromPoint(
+      session.dropTarget = updateDropTargetFromPoint(
         touch.clientX,
         touch.clientY,
         session.payload.type,
       );
+      session.isOverEditor = session.dropTarget.isOverEditor;
     }
 
-    if (session.active && session.isOverEditor) {
+    if (session.active && session.dropTarget?.isOverEditor) {
       e.preventDefault();
 
       if (session.payload.type === 'bubble') {
-        moveBubbleToSelection(session.payload.index);
+        moveBubbleToSelection(session.payload.index, session.dropTarget.selectionTarget);
       } else {
-        insertValueAtSelection(session.payload.value, session.payload.category ?? activeCategory);
+        insertValueAtSelection(
+          session.payload.value,
+          session.payload.category ?? activeCategory,
+          session.dropTarget.replaceTargetIndex,
+          session.dropTarget.selectionTarget,
+        );
       }
     }
 
@@ -677,8 +725,11 @@ const App = () => {
             <p className="text-[10px] text-blue-500 font-bold uppercase mt-1 tracking-widest">AI Speech Assistant</p>
           </div>
         </div>
-        <button className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all">
-          儲存
+        <button
+          type="button"
+          className="w-11 h-11 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 shadow-sm transition-all hover:bg-slate-900 hover:text-white"
+        >
+          <Settings size={18} className="mx-auto" />
         </button>
       </header>
 
@@ -852,6 +903,15 @@ const App = () => {
           ))}
         </div>
 
+        <div className="flex justify-end">
+          <button
+            type="button"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all"
+          >
+            儲存
+          </button>
+        </div>
+
         <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-72 opacity-100' : 'h-0 opacity-0'}`}>
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
             {activeCategory && (
@@ -914,11 +974,14 @@ const App = () => {
 
       <div className="h-24 bg-white border-t flex items-center justify-center gap-12 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] z-10">
         <button
-          onClick={() => setActiveCategory('templates')}
-          className={`flex flex-col items-center gap-1 transition-opacity ${activeCategory === 'templates' ? 'opacity-100 text-orange-500' : 'opacity-40 text-slate-500'}`}
+          type="button"
+          onClick={() => setActiveShortcut('record')}
+          className={`flex flex-col items-center gap-1 transition-opacity ${
+            activeShortcut === 'record' ? 'opacity-100 text-orange-500' : 'opacity-40 text-slate-500'
+          }`}
         >
-          <ClipboardList size={20} />
-          <span className="text-[9px] font-bold uppercase">模板</span>
+          <FileText size={20} />
+          <span className="text-[9px] font-bold">護理紀錄</span>
         </button>
 
         <button className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center text-white shadow-xl active:scale-90 transition-transform -mt-10 border-[6px] border-slate-50 relative group">
@@ -927,11 +990,14 @@ const App = () => {
         </button>
 
         <button
-          onClick={() => setActiveCategory('personnel')}
-          className={`flex flex-col items-center gap-1 transition-opacity ${activeCategory === 'personnel' ? 'opacity-100 text-blue-500' : 'opacity-40 text-slate-500'}`}
+          type="button"
+          onClick={() => setActiveShortcut('plan')}
+          className={`flex flex-col items-center gap-1 transition-opacity ${
+            activeShortcut === 'plan' ? 'opacity-100 text-blue-500' : 'opacity-40 text-slate-500'
+          }`}
         >
-          <Users size={20} />
-          <span className="text-[9px] font-bold uppercase">人員</span>
+          <ClipboardList size={20} />
+          <span className="text-[9px] font-bold">護理計畫</span>
         </button>
       </div>
 
