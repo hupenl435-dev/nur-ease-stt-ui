@@ -1,5 +1,4 @@
 import React, { useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
 import {
   Mic,
   RotateCcw,
@@ -7,6 +6,7 @@ import {
   ClipboardList,
   Pill,
   Check,
+  X,
   PlusCircle,
   Sparkles,
   FileText,
@@ -325,7 +325,6 @@ const App = () => {
   const [dragMode, setDragMode] = useState(null);
   const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
   const [caretIndicator, setCaretIndicator] = useState(null);
-  const [touchPreview, setTouchPreview] = useState(null);
   const [activeShortcut, setActiveShortcut] = useState('record');
   const [itemsData] = useState(() => createItemsData());
 
@@ -362,7 +361,6 @@ const App = () => {
     setDragPayload(null);
     setDragMode(null);
     setIsDraggingOverEditor(false);
-    setTouchPreview(null);
     clearVisualIndicator();
   };
 
@@ -842,12 +840,6 @@ const App = () => {
       setDragMode('touch');
       setDragPayload(session.payload);
     }
-    setTouchPreview({
-      x: touch.clientX,
-      y: touch.clientY,
-      category: session.payload.category,
-      value: session.payload.value,
-    });
     session.dropTarget = updateDropTargetFromPoint(touch.clientX, touch.clientY, session.payload.type);
     session.isOverEditor = session.dropTarget.isOverEditor;
   };
@@ -1009,73 +1001,91 @@ const App = () => {
                       {part.value}
                     </span>
                   ) : part.type === 'bubble' ? (
-                    <button
-                      type="button"
-                      draggable={!part.isPreview}
-                      data-drop-kind="boundary"
-                      data-drop-before={part.dropBeforeAttr}
-                      data-drop-after={part.dropAfterAttr}
-                      onClick={
-                        part.isPreview
-                          ? undefined
-                          : () => {
-                              setReplaceTargetIndex(part.sourceIndex);
-                              setSelectionTarget({ type: 'between', index: part.sourceIndex });
-                              setActiveCategory(part.category);
-                            }
-                      }
-                      onFocus={
-                        part.isPreview
-                          ? undefined
-                          : () => {
-                              setReplaceTargetIndex(part.sourceIndex);
-                              setSelectionTarget({ type: 'between', index: part.sourceIndex });
-                            }
-                      }
-                      onDragStart={
-                        part.isPreview
-                          ? undefined
-                          : (e) => handleBubbleDragStart(e, part.sourceIndex, part)
-                      }
-                      onDragEnd={part.isPreview ? undefined : handleDragEnd}
-                      onTouchStart={
-                        part.isPreview
-                          ? undefined
-                          : (e) =>
-                              startTouchDrag(
-                                {
-                                  type: 'bubble',
-                                  value: part.value,
-                                  index: part.sourceIndex,
-                                  category: part.category,
-                                },
-                                e.touches[0],
-                              )
-                      }
-                      onTouchMove={part.isPreview ? undefined : handleTouchMove}
-                      onTouchEnd={part.isPreview ? undefined : handleTouchEnd}
-                      onTouchCancel={part.isPreview ? undefined : handleTouchCancel}
-                      onKeyDown={part.isPreview ? undefined : (e) => handleBubbleKeyDown(e, part.sourceIndex)}
-                      onDragOver={(e) => handleInlineBoundaryDragOver(e, beforeDrop, afterDrop)}
-                      onDrop={handleDrop}
-                      className={`drag-chip mx-1 inline-flex align-baseline rounded-full border items-center justify-center transition-all duration-150 ease-out shadow-sm overflow-hidden ${
-                        part.isPreview
-                          ? 'border-blue-300 bg-blue-100/80 text-blue-700 opacity-60 scale-[0.98] shadow-[0_10px_24px_rgba(59,130,246,0.14)]'
-                          : replaceTargetIndex === part.sourceIndex
-                          ? 'border-blue-500 bg-blue-600 text-white scale-105'
-                          : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
-                      } ${part.isNew ? 'bubble-pop' : ''}`}
-                    >
-                      <span
-                        className={`font-bold ${
+                    <span className="relative mx-1 inline-flex align-baseline">
+                      <button
+                        type="button"
+                        draggable={!part.isPreview}
+                        data-drop-kind="boundary"
+                        data-drop-before={part.dropBeforeAttr}
+                        data-drop-after={part.dropAfterAttr}
+                        onClick={
                           part.isPreview
-                            ? 'text-sm'
-                            : 'text-sm'
-                        }`}
+                            ? undefined
+                            : () => {
+                                setReplaceTargetIndex(part.sourceIndex);
+                                setSelectionTarget({ type: 'between', index: part.sourceIndex });
+                                setActiveCategory(part.category);
+                              }
+                        }
+                        onFocus={
+                          part.isPreview
+                            ? undefined
+                            : () => {
+                                setReplaceTargetIndex(part.sourceIndex);
+                                setSelectionTarget({ type: 'between', index: part.sourceIndex });
+                              }
+                        }
+                        onDragStart={
+                          part.isPreview
+                            ? undefined
+                            : (e) => handleBubbleDragStart(e, part.sourceIndex, part)
+                        }
+                        onDragEnd={part.isPreview ? undefined : handleDragEnd}
+                        onTouchStart={
+                          part.isPreview
+                            ? undefined
+                            : (e) =>
+                                startTouchDrag(
+                                  {
+                                    type: 'bubble',
+                                    value: part.value,
+                                    index: part.sourceIndex,
+                                    category: part.category,
+                                  },
+                                  e.touches[0],
+                                )
+                        }
+                        onTouchMove={part.isPreview ? undefined : handleTouchMove}
+                        onTouchEnd={part.isPreview ? undefined : handleTouchEnd}
+                        onTouchCancel={part.isPreview ? undefined : handleTouchCancel}
+                        onKeyDown={part.isPreview ? undefined : (e) => handleBubbleKeyDown(e, part.sourceIndex)}
+                        onDragOver={(e) => handleInlineBoundaryDragOver(e, beforeDrop, afterDrop)}
+                        onDrop={handleDrop}
+                        className={`drag-chip inline-flex align-baseline rounded-full border items-center justify-center px-3.5 py-0.5 transition-all duration-150 ease-out shadow-sm overflow-hidden ${
+                          part.isPreview
+                            ? 'border-blue-300 bg-blue-100/80 text-blue-700 opacity-60 scale-[0.98] shadow-[0_10px_24px_rgba(59,130,246,0.14)]'
+                            : replaceTargetIndex === part.sourceIndex
+                            ? 'border-blue-500 bg-blue-600 text-white scale-105'
+                            : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
+                        } ${part.isNew ? 'bubble-pop' : ''}`}
                       >
-                        {part.value}
-                      </span>
-                    </button>
+                        <span className="font-bold text-sm">{part.value}</span>
+                      </button>
+                      {!part.isPreview && (
+                        <button
+                          type="button"
+                          aria-label={`刪除 ${part.value}`}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            removePartAtIndex(part.sourceIndex, {
+                              type: 'between',
+                              index: part.sourceIndex,
+                            });
+                          }}
+                          className="absolute -right-2.5 -top-2.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition-colors hover:border-red-200 hover:text-red-500 active:scale-95"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </span>
                   ) : (
                     <button
                       type="button"
@@ -1159,7 +1169,7 @@ const App = () => {
           ))}
         </div>
 
-        <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-[50vh] sm:h-72 opacity-100' : 'h-0 opacity-0'}`}>
+        <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-[25vh] opacity-100' : 'h-0 opacity-0'}`}>
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
             {dragMode === 'touch' && dragPayload && (
               <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
@@ -1182,7 +1192,7 @@ const App = () => {
                     onTouchCancel={handleTouchCancel}
                     className={`drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 rounded-2xl border border-transparent hover:shadow-md transition-all duration-150 ease-out group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing overflow-hidden p-4 ${
                       isTouchDraggingListItem(item)
-                        ? 'border-blue-200 bg-blue-50/80 opacity-45 scale-[0.98]'
+                        ? 'pointer-events-none opacity-0'
                         : ''
                     }`}
                   >
@@ -1202,17 +1212,6 @@ const App = () => {
           </div>
         </div>
       </main>
-
-      {touchPreview && dragMode === 'touch' && (
-        <div
-          className="pointer-events-none fixed z-30 h-12 w-2.5 rounded-full bg-blue-500/90 shadow-[0_10px_30px_rgba(37,99,235,0.28)]"
-          style={{
-            left: `${touchPreview.x}px`,
-            top: `${touchPreview.y - 6}px`,
-            transform: 'translate(-50%, -50%)',
-          }}
-        />
-      )}
 
       <div className="h-24 bg-white border-t flex items-center justify-center gap-12 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] z-10">
         <button
