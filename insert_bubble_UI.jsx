@@ -10,6 +10,8 @@ import {
   PlusCircle,
   Sparkles,
   FileText,
+  User,
+  ArrowRightLeft,
   Settings,
 } from 'lucide-react';
 
@@ -1394,22 +1396,43 @@ const App = () => {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans max-w-md mx-auto border-x shadow-2xl overflow-hidden relative text-slate-800">
-      <header className="px-5 py-4 flex justify-between items-center bg-white border-b z-10 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-slate-900 rounded-xl flex items-center justify-center text-white shadow-md">
-            <Sparkles size={18} className="text-blue-400" />
+      
+      {/* 新的病人資訊卡頂部 Header */}
+      <header className="px-4 py-3 flex justify-between items-center bg-white border-b z-10 shadow-sm shrink-0">
+        <div className="flex items-center gap-3 overflow-hidden">
+          <div className="bg-blue-600 text-white px-2 py-1.5 rounded-xl flex flex-col items-center justify-center min-w-[3.5rem] shrink-0 shadow-md shadow-blue-200">
+            <span className="text-[9px] text-blue-100 font-bold leading-none mb-1 tracking-widest">床號</span>
+            <span className="text-sm font-black leading-none tracking-wide">10A-05</span>
           </div>
-          <div>
-            <h1 className="text-lg font-black text-slate-900 leading-none tracking-tight">護理語音助手</h1>
-            <p className="text-[10px] text-blue-500 font-bold uppercase mt-1 tracking-widest">AI Speech Assistant</p>
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-baseline gap-2 truncate">
+              <h1 className="text-base font-bold text-slate-800 leading-tight truncate">王大明</h1>
+              <span className="text-[11px] text-slate-500 font-medium shrink-0">男 · 65歲</span>
+            </div>
+            <div className="text-[11px] text-slate-400 mt-1 font-medium flex items-center gap-1 truncate">
+              <User size={10} className="shrink-0" />
+              <span className="truncate">主治: 林建國 醫師</span>
+            </div>
           </div>
         </div>
-        <button
-          type="button"
-          className="w-11 h-11 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 shadow-sm transition-all hover:bg-slate-900 hover:text-white"
-        >
-          <Settings size={18} className="mx-auto" />
-        </button>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          {/* 切換按鈕 */}
+          <button
+            type="button"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-all hover:bg-slate-50 active:scale-95"
+          >
+            <ArrowRightLeft size={14} />
+            <span className="text-xs font-bold hidden sm:inline-block">切換</span>
+          </button>
+
+          {/* 設定按鈕 (新加回來的) */}
+          <button
+            type="button"
+            className="w-9 h-9 flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-500 shadow-sm transition-all hover:bg-slate-900 hover:text-white active:scale-95"
+          >
+            <Settings size={16} />
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
@@ -1632,25 +1655,38 @@ const App = () => {
             })}
           </div>
 
-          <div className="mt-auto pt-6 flex justify-between items-center text-slate-300 pointer-events-none">
-            <span className="text-[10px] font-bold tracking-widest uppercase">
-              可直接拖曳或點選下方項目，插入到目前游標位置
-            </span>
-            <div className="flex items-center gap-3">
-              <button onClick={() => window.location.reload()} className="pointer-events-auto hover:text-slate-500">
-                <RotateCcw size={16} />
-              </button>
+          <div className="mt-auto pt-6 flex justify-end items-center pointer-events-none">
+            <div className="flex items-center gap-2 shrink-0">
+              {/* 儲存按鈕 */}
               <button
                 type="button"
                 className="pointer-events-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all"
               >
                 儲存
               </button>
+              
+              {/* AI 優化按鈕 */}
+              <button
+                type="button"
+                className="pointer-events-auto flex items-center gap-1.5 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-lg shadow-violet-200/50 active:scale-95 transition-all"
+              >
+                <Sparkles size={14} />
+                AI 優化
+              </button>
+
+              {/* 回復按鈕 */}
+              <button 
+                onClick={() => window.location.reload()} 
+                className="pointer-events-auto flex items-center justify-center h-[32px] w-[32px] text-slate-400 hover:text-slate-600 transition-colors bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 active:scale-95"
+                title="回復"
+              >
+                <RotateCcw size={14} />
+              </button>
             </div>
           </div>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar shrink-0">
           {categories.map((cat) => (
             <button
               key={cat.id}
@@ -1667,7 +1703,7 @@ const App = () => {
           ))}
         </div>
 
-        <div className={`transition-all duration-300 ease-in-out overflow-hidden ${activeCategory ? 'h-[25vh] opacity-100' : 'h-0 opacity-0'}`}>
+        <div className={`transition-all duration-300 ease-in-out overflow-hidden shrink-0 ${activeCategory ? 'h-[25vh] opacity-100' : 'h-0 opacity-0'}`}>
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
             {dragMode === 'touch' && dragPayload && (
               <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
@@ -1711,7 +1747,7 @@ const App = () => {
         </div>
       </main>
 
-      <div className="h-24 bg-white border-t flex items-center justify-center gap-12 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] z-10">
+      <div className="h-24 bg-white border-t flex items-center justify-center gap-12 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] z-10 shrink-0">
         <button
           type="button"
           onClick={() => setActiveShortcut('record')}
