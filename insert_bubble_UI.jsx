@@ -14,10 +14,9 @@ import {
 } from 'lucide-react';
 
 const TOUCH_DRAG_THRESHOLD = 8;
-const FLOW_END_MARKER = '\u200B';
-
 const isInlineChip = (part) => part?.type === 'bubble' || part?.type === 'placeholder';
 const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
+const getPartLinearLength = (part) => (part?.type === 'text' ? part.value.length : 1);
 
 const createDropLocation = (selectionTarget, replaceTargetIndex = null) => ({
   selectionTarget,
@@ -333,6 +332,234 @@ const App = () => {
   const flowEndRef = useRef(null);
   const touchDragRef = useRef(null);
   const transparentDragImageRef = useRef(null);
+  const suppressClickAfterSelectionRef = useRef(false);
+
+  const getTotalLinearLength = (parts = contentParts) =>
+    parts.reduce((total, part) => total + getPartLinearLength(part), 0);
+
+  const getPartLinearStart = (index, parts = contentParts) => {
+    let total = 0;
+    for (let currentIndex = 0; currentIndex < index; currentIndex += 1) {
+      total += getPartLinearLength(parts[currentIndex]);
+    }
+    return total;
+  };
+
+  const getSelectionTargetFromLinearOffset = (parts, offset) => {
+    const clampedOffset = clamp(offset, 0, getTotalLinearLength(parts));
+    let currentOffset = 0;
+
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      const partLength = getPartLinearLength(part);
+      const partStart = currentOffset;
+      const partEnd = partStart + partLength;
+
+      if (part.type === 'text' && clampedOffset >= partStart && clampedOffset <= partEnd) {
+        return { type: 'text', index, offset: clampedOffset - partStart };
+      }
+
+      if (clampedOffset === partStart) {
+        return { type: 'between', index };
+      }
+
+      currentOffset = partEnd;
+    }
+
+    return { type: 'between', index: parts.length };
+  };
+
+  const hasExpandedDOMSelection = () => {
+    const selection = window.getSelection();
+    return Boolean(selection && selection.rangeCount > 0 && !selection.isCollapsed);
+  };
+
+  const getNodeLinearLength = (node) => {
+    if (!node) return 0;
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent?.length ?? 0;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return 0;
+    }
+
+    const partIndex = Number(node.dataset.partIndex);
+    const partType = node.dataset.partType;
+
+    if (Number.isNaN(partIndex) || !partType) {
+      return node.textContent?.length ?? 0;
+    }
+
+    if (partType === 'text') {
+      return node.textContent?.length ?? 0;
+    }
+
+    return 1;
+  };
+
+  const getLinearOffsetFromDOMPosition = (container, offset, boundaryType = 'start') => {
+    const flow = flowRef.current;
+    if (!flow || !container) return null;
+
+    if (container === flow) {
+      let linearOffset = 0;
+      for (let childIndex = 0; childIndex < offset; childIndex += 1) {
+        linearOffset += getNodeLinearLength(flow.childNodes[childIndex]);
+      }
+      return linearOffset;
+    }
+
+    const element =
+      container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+    const partElement = element?.closest?.('[data-part-index]');
+
+    if (!partElement || !flow.contains(partElement)) {
+      return null;
+    }
+
+    const index = Number(partElement.dataset.partIndex);
+    const partType = partElement.dataset.partType;
+    const partStart = getPartLinearStart(index);
+
+    if (partType === 'text') {
+      const measurementRange = document.createRange();
+      measurementRange.selectNodeContents(partElement);
+      measurementRange.setEnd(container, offset);
+
+      return clamp(
+        partStart + measurementRange.toString().length,
+        partStart,
+        partStart + (partElement.textContent?.length ?? 0),
+      );
+    }
+
+    return boundaryType === 'start'
+      ? partStart
+      : partStart + getPartLinearLength(contentParts[index]);
+  };
+
+  const deleteRangeFromParts = (parts, startOffset, endOffset) => {
+    const rangeStart = clamp(Math.min(startOffset, endOffset), 0, getTotalLinearLength(parts));
+    const rangeEnd = clamp(Math.max(startOffset, endOffset), 0, getTotalLinearLength(parts));
+
+    if (rangeStart === rangeEnd) {
+      return {
+        nextParts: parts,
+        nextSelection: getSelectionTargetFromLinearOffset(parts, rangeStart),
+      };
+    }
+
+    let currentOffset = 0;
+    const nextParts = [];
+
+    parts.forEach((part) => {
+      const partLength = getPartLinearLength(part);
+      const partStart = currentOffset;
+      const partEnd = partStart + partLength;
+
+      if (rangeEnd <= partStart || rangeStart >= partEnd) {
+        nextParts.push(part);
+      } else if (part.type === 'text') {
+        const localStart = clamp(rangeStart - partStart, 0, part.value.length);
+        const localEnd = clamp(rangeEnd - partStart, 0, part.value.length);
+        const nextValue = `${part.value.slice(0, localStart)}${part.value.slice(localEnd)}`;
+
+        if (nextValue) {
+          nextParts.push({ ...part, value: nextValue });
+        }
+      }
+
+      currentOffset = partEnd;
+    });
+
+    const normalizedParts = normalizeParts(nextParts);
+    return {
+      nextParts: normalizedParts,
+      nextSelection: getSelectionTargetFromLinearOffset(normalizedParts, rangeStart),
+    };
+  };
+
+  const serializeRangeToPlainText = (parts, startOffset, endOffset) => {
+    const rangeStart = clamp(Math.min(startOffset, endOffset), 0, getTotalLinearLength(parts));
+    const rangeEnd = clamp(Math.max(startOffset, endOffset), 0, getTotalLinearLength(parts));
+
+    let currentOffset = 0;
+    let result = '';
+
+    parts.forEach((part) => {
+      const partLength = getPartLinearLength(part);
+      const partStart = currentOffset;
+      const partEnd = partStart + partLength;
+
+      if (rangeEnd <= partStart || rangeStart >= partEnd) {
+        currentOffset = partEnd;
+        return;
+      }
+
+      if (part.type === 'text') {
+        const localStart = clamp(rangeStart - partStart, 0, part.value.length);
+        const localEnd = clamp(rangeEnd - partStart, 0, part.value.length);
+        result += part.value.slice(localStart, localEnd);
+      } else {
+        result += part.value;
+      }
+
+      currentOffset = partEnd;
+    });
+
+    return result;
+  };
+
+  const insertTextIntoParts = (parts, text, target) => {
+    if (!text) return;
+
+    if (target?.type === 'text') {
+      const textPart = parts[target.index];
+      if (textPart?.type === 'text') {
+        const safeOffset = clamp(target.offset, 0, textPart.value.length);
+        const beforeText = textPart.value.slice(0, safeOffset);
+        const afterText = textPart.value.slice(safeOffset);
+        const replacementParts = [];
+
+        if (beforeText) replacementParts.push({ type: 'text', value: beforeText });
+        replacementParts.push({ type: 'text', value: text });
+        if (afterText) replacementParts.push({ type: 'text', value: afterText });
+
+        parts.splice(target.index, 1, ...replacementParts);
+        return;
+      }
+    }
+
+    const insertIndex = clamp(target?.index ?? parts.length, 0, parts.length);
+    parts.splice(insertIndex, 0, { type: 'text', value: text });
+  };
+
+  const getLinearRangeFromSelection = (selection) => {
+    const flow = flowRef.current;
+    if (!flow || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!flow.contains(range.commonAncestorContainer)) {
+      return null;
+    }
+
+    const start = getLinearOffsetFromDOMPosition(
+      range.startContainer,
+      range.startOffset,
+      'start',
+    );
+    const end = getLinearOffsetFromDOMPosition(range.endContainer, range.endOffset, 'end');
+
+    if (start === null || end === null || start === end) {
+      return null;
+    }
+
+    return { start: Math.min(start, end), end: Math.max(start, end) };
+  };
 
   const categories = [
     { id: 'physician', label: '醫師', icon: <Users size={16} /> },
@@ -362,6 +589,13 @@ const App = () => {
     setDragMode(null);
     setIsDraggingOverEditor(false);
     clearVisualIndicator();
+  };
+
+  const suppressPostSelectionClick = () => {
+    suppressClickAfterSelectionRef.current = true;
+    window.setTimeout(() => {
+      suppressClickAfterSelectionRef.current = false;
+    }, 0);
   };
 
   const updateIndicatorFromRange = (range) => {
@@ -416,10 +650,19 @@ const App = () => {
 
   const focusFlowEndAnchor = () => {
     const anchor = flowEndRef.current;
+    const flow = flowRef.current;
     const selection = window.getSelection();
     if (!selection) return;
 
     if (!anchor) {
+      if (flow) {
+        flow.focus();
+        const range = document.createRange();
+        range.selectNodeContents(flow);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
       setBetweenSelection(contentParts.length);
       updateIndicatorAtFlowEnd();
       return;
@@ -483,22 +726,26 @@ const App = () => {
     const range = getCaretRangeFromPoint(x, y);
 
     if (!range || !target.contains(range.startContainer)) {
-      const snappedOffset = getNearestWordBoundary(
-        fullTextValue,
+      const resolvedOffset = clamp(
         baseOffset + target.innerText.length,
+        0,
+        fullTextValue.length,
       );
-      const localOffset = clamp(snappedOffset - baseOffset, 0, target.innerText.length);
+      const localOffset = clamp(resolvedOffset - baseOffset, 0, target.innerText.length);
       setDOMCaretAtOffset(target, localOffset);
-      setTextSelection(index, snappedOffset);
-      return { type: 'text', index, offset: snappedOffset };
+      setTextSelection(index, resolvedOffset);
+      return { type: 'text', index, offset: resolvedOffset };
     }
 
-    const rawOffset = baseOffset + getRangeOffsetWithinTarget(target, range);
-    const snappedOffset = getNearestWordBoundary(fullTextValue, rawOffset);
-    const localOffset = clamp(snappedOffset - baseOffset, 0, target.innerText.length);
+    const resolvedOffset = clamp(
+      baseOffset + getRangeOffsetWithinTarget(target, range),
+      0,
+      fullTextValue.length,
+    );
+    const localOffset = clamp(resolvedOffset - baseOffset, 0, target.innerText.length);
     setDOMCaretAtOffset(target, localOffset);
-    setTextSelection(index, snappedOffset);
-    return { type: 'text', index, offset: snappedOffset };
+    setTextSelection(index, resolvedOffset);
+    return { type: 'text', index, offset: resolvedOffset };
   };
 
   const updateContentParts = (nextParts, nextSelection = null) => {
@@ -588,38 +835,11 @@ const App = () => {
     insertValueAtSelection(value);
   };
 
-  const handleTextEdit = (index, newValue) => {
-    const nextParts = [...contentParts];
-    if (!nextParts[index] || nextParts[index].type !== 'text') return;
-
-    nextParts[index] = { type: 'text', value: newValue };
-    setContentParts(normalizeParts(nextParts));
-  };
-
-  const handleTextKeyDown = (e, index) => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || !e.currentTarget.contains(selection.anchorNode)) {
-      return;
-    }
-
-    const caretOffset = getRangeOffsetWithinTarget(e.currentTarget, selection.getRangeAt(0));
-    const currentValueLength = e.currentTarget.innerText.length;
-    const previousPart = contentParts[index - 1];
-    const nextPart = contentParts[index + 1];
-
-    if (e.key === 'Backspace' && caretOffset === 0 && isInlineChip(previousPart)) {
-      e.preventDefault();
-      removePartAtIndex(index - 1);
-      return;
-    }
-
-    if (e.key === 'Delete' && caretOffset === currentValueLength && isInlineChip(nextPart)) {
-      e.preventDefault();
-      removePartAtIndex(index + 1);
-      return;
-    }
-
-    setReplaceTargetIndex(null);
+  const selectBubbleForReplacement = (index, category) => {
+    setReplaceTargetIndex(index);
+    setSelectionTarget({ type: 'between', index });
+    setActiveCategory(category ?? null);
+    editorRef.current?.focus({ preventScroll: true });
   };
 
   const handleBubbleKeyDown = (e, index) => {
@@ -629,34 +849,303 @@ const App = () => {
     removePartAtIndex(index);
   };
 
-  const handleFlowEndKeyDown = (e) => {
-    if (e.key === 'Backspace' && isInlineChip(contentParts[contentParts.length - 1])) {
-      e.preventDefault();
-      removePartAtIndex(contentParts.length - 1, {
-        type: 'between',
-        index: Math.max(contentParts.length - 1, 0),
-      });
+  const parseContentPartsFromDOM = () => {
+    const flow = flowRef.current;
+    if (!flow) return contentParts;
+
+    const nextParts = [];
+    const pushTextPart = (value) => {
+      if (!value) return;
+
+      const previousPart = nextParts[nextParts.length - 1];
+      if (previousPart?.type === 'text') {
+        previousPart.value += value;
+      } else {
+        nextParts.push({ type: 'text', value });
+      }
+    };
+
+    flow.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        pushTextPart(node.textContent ?? '');
+        return;
+      }
+
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return;
+      }
+
+      const partType = node.dataset.partType;
+      if (partType === 'bubble' || partType === 'placeholder') {
+        nextParts.push({
+          type: partType,
+          value: node.dataset.partValue ?? '',
+          category: node.dataset.partCategory || null,
+        });
+        return;
+      }
+
+      pushTextPart(node.textContent ?? '');
+    });
+
+    return normalizeParts(nextParts);
+  };
+
+  const syncEditorSelection = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !flowRef.current) {
       return;
     }
 
-    if (e.key === 'Delete') {
-      e.preventDefault();
+    const range = selection.getRangeAt(0);
+    if (!selection.isCollapsed) {
+      clearVisualIndicator();
+      setReplaceTargetIndex(null);
       return;
     }
 
-    if (
-      !['Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)
-      && !e.metaKey
-      && !e.ctrlKey
-      && !e.altKey
-    ) {
-      e.preventDefault();
+    if (!flowRef.current.contains(range.startContainer)) {
+      return;
+    }
+
+    const linearOffset = getLinearOffsetFromDOMPosition(
+      range.startContainer,
+      range.startOffset,
+      'start',
+    );
+
+    if (linearOffset === null) {
+      return;
+    }
+
+    setSelectionTarget(getSelectionTargetFromLinearOffset(contentParts, linearOffset));
+    setReplaceTargetIndex(null);
+    updateIndicatorFromRange(range);
+  };
+
+  const handleFlowMouseUp = () => {
+    if (hasExpandedDOMSelection()) {
+      suppressPostSelectionClick();
+      clearVisualIndicator();
+      return;
+    }
+
+    syncEditorSelection();
+  };
+
+  const getCollapsedSelectionState = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed || !flowRef.current) {
+      return null;
+    }
+
+    if (!flowRef.current.contains(selection.anchorNode)) {
+      return null;
+    }
+
+    const linearOffset = getLinearOffsetFromDOMPosition(
+      selection.anchorNode,
+      selection.anchorOffset,
+      'start',
+    );
+
+    if (linearOffset === null) {
+      return null;
+    }
+
+    return {
+      linearOffset,
+      target: getSelectionTargetFromLinearOffset(contentParts, linearOffset),
+    };
+  };
+
+  const handleFlowInput = () => {
+    const selection = window.getSelection();
+    const linearOffset =
+      selection && selection.rangeCount > 0 && selection.isCollapsed
+        ? getLinearOffsetFromDOMPosition(selection.anchorNode, selection.anchorOffset, 'start')
+        : null;
+
+    const nextParts = parseContentPartsFromDOM();
+    setContentParts(nextParts);
+    setReplaceTargetIndex(null);
+
+    if (linearOffset !== null) {
+      setSelectionTarget(getSelectionTargetFromLinearOffset(nextParts, linearOffset));
     }
   };
 
-  const syncFlowEndSelection = () => {
-    setBetweenSelection(contentParts.length);
-    updateIndicatorAtFlowEnd();
+  const replaceCurrentSelectionWithText = (text) => {
+    if (!text) return;
+
+    const selection = window.getSelection();
+    const selectedRange = getLinearRangeFromSelection(selection);
+    const insertionOffset = selectedRange
+      ? selectedRange.start
+      : selection && selection.rangeCount > 0
+      ? getLinearOffsetFromDOMPosition(selection.anchorNode, selection.anchorOffset, 'start')
+      : getTotalLinearLength();
+
+    const safeInsertionOffset = insertionOffset ?? getTotalLinearLength();
+    const baseParts = selectedRange
+      ? deleteRangeFromParts(contentParts, selectedRange.start, selectedRange.end).nextParts
+      : contentParts;
+    const nextParts = [...baseParts];
+    const target = getSelectionTargetFromLinearOffset(nextParts, safeInsertionOffset);
+
+    insertTextIntoParts(nextParts, text, target);
+
+    const normalizedParts = normalizeParts(nextParts);
+    updateContentParts(
+      normalizedParts,
+      getSelectionTargetFromLinearOffset(normalizedParts, safeInsertionOffset + text.length),
+    );
+  };
+
+  const deleteSelectedRange = (range) => {
+    if (!range) return false;
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    clearVisualIndicator();
+
+    const { nextParts, nextSelection } = deleteRangeFromParts(
+      contentParts,
+      range.start,
+      range.end,
+    );
+
+    updateContentParts(nextParts, nextSelection);
+    return true;
+  };
+
+  const handleFlowCopy = (e) => {
+    const selectedRange = getLinearRangeFromSelection(window.getSelection());
+    if (!selectedRange) return;
+
+    e.preventDefault();
+    const copiedText = serializeRangeToPlainText(
+      contentParts,
+      selectedRange.start,
+      selectedRange.end,
+    );
+    e.clipboardData.setData('text/plain', copiedText);
+  };
+
+  const handleFlowCut = (e) => {
+    const selectedRange = getLinearRangeFromSelection(window.getSelection());
+    if (!selectedRange) return;
+
+    e.preventDefault();
+    const copiedText = serializeRangeToPlainText(
+      contentParts,
+      selectedRange.start,
+      selectedRange.end,
+    );
+    e.clipboardData.setData('text/plain', copiedText);
+    deleteSelectedRange(selectedRange);
+  };
+
+  const handleFlowPaste = (e) => {
+    const pastedText = e.clipboardData.getData('text/plain');
+    if (!pastedText) return;
+
+    e.preventDefault();
+    replaceCurrentSelectionWithText(pastedText);
+  };
+
+  const handleEditorKeyDownCapture = (e) => {
+    if (e.key !== 'Backspace' && e.key !== 'Delete') {
+      return;
+    }
+
+    const selectedRange = getLinearRangeFromSelection(window.getSelection());
+    if (selectedRange && selectedRange.start !== selectedRange.end) {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteSelectedRange(selectedRange);
+      return;
+    }
+
+    if (replaceTargetIndex === null || !isInlineChip(contentParts[replaceTargetIndex])) {
+      const collapsedSelection = getCollapsedSelectionState();
+      if (!collapsedSelection) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      const { target } = collapsedSelection;
+
+      if (target.type === 'text') {
+        const currentPart = contentParts[target.index];
+        const previousPart = contentParts[target.index - 1];
+        const nextPart = contentParts[target.index + 1];
+
+        if (e.key === 'Backspace' && target.offset === 0 && isInlineChip(previousPart)) {
+          e.preventDefault();
+          e.stopPropagation();
+          removePartAtIndex(target.index - 1, {
+            type: 'text',
+            index: Math.max(target.index - 1, 0),
+            offset: 0,
+          });
+          return;
+        }
+
+        if (
+          e.key === 'Delete'
+          && currentPart?.type === 'text'
+          && target.offset === currentPart.value.length
+          && isInlineChip(nextPart)
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          removePartAtIndex(target.index + 1, {
+            type: 'text',
+            index: target.index,
+            offset: currentPart.value.length,
+          });
+          return;
+        }
+
+        return;
+      }
+
+      const previousPart = contentParts[target.index - 1];
+      const nextPart = contentParts[target.index];
+
+      if (e.key === 'Backspace' && isInlineChip(previousPart)) {
+        e.preventDefault();
+        e.stopPropagation();
+        removePartAtIndex(target.index - 1, {
+          type: 'between',
+          index: Math.max(target.index - 1, 0),
+        });
+        return;
+      }
+
+      if (e.key === 'Delete' && isInlineChip(nextPart)) {
+        e.preventDefault();
+        e.stopPropagation();
+        removePartAtIndex(target.index, {
+          type: 'between',
+          index: target.index,
+        });
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+    removePartAtIndex(replaceTargetIndex, {
+      type: 'between',
+      index: replaceTargetIndex,
+    });
   };
 
   const applyBoundaryDropLocation = (element, clientX, beforeDrop, afterDrop, payloadType) => {
@@ -902,8 +1391,6 @@ const App = () => {
 
   const isPreviewActive = Boolean(previewState);
   const renderParts = buildRenderableParts(contentParts, previewState);
-  const showFlowEndAnchor =
-    !isPreviewActive && (contentParts.length === 0 || isInlineChip(contentParts[contentParts.length - 1]));
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans max-w-md mx-auto border-x shadow-2xl overflow-hidden relative text-slate-800">
@@ -928,10 +1415,16 @@ const App = () => {
       <main className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
         <div
           ref={editorRef}
+          tabIndex={-1}
           className={`flex-1 bg-white rounded-[2rem] p-6 shadow-sm border flex flex-col relative overflow-y-auto transition-colors ${
             isDraggingOverEditor ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200'
-          }`}
+          } outline-none`}
+          onKeyDownCapture={handleEditorKeyDownCapture}
           onClick={(e) => {
+            if (hasExpandedDOMSelection() || suppressClickAfterSelectionRef.current) {
+              return;
+            }
+
             if (e.target === e.currentTarget) {
               focusFlowEndAnchor();
             }
@@ -957,10 +1450,29 @@ const App = () => {
 
           <div
             ref={flowRef}
-            className="leading-[2.2] text-lg font-medium text-slate-700 whitespace-pre-wrap break-words"
+            contentEditable={!isPreviewActive}
+            suppressContentEditableWarning
+            spellCheck={false}
+            className="leading-[2.2] text-lg font-medium text-slate-700 whitespace-pre-wrap break-words outline-none"
+            onInput={!isPreviewActive ? handleFlowInput : undefined}
+            onCopy={!isPreviewActive ? handleFlowCopy : undefined}
+            onCut={!isPreviewActive ? handleFlowCut : undefined}
+            onPaste={!isPreviewActive ? handleFlowPaste : undefined}
+            onFocus={!isPreviewActive ? syncEditorSelection : undefined}
+            onKeyUp={!isPreviewActive ? syncEditorSelection : undefined}
+            onMouseUp={!isPreviewActive ? handleFlowMouseUp : undefined}
             onClick={(e) => {
+              if (hasExpandedDOMSelection() || suppressClickAfterSelectionRef.current) {
+                return;
+              }
+
               if (e.target === e.currentTarget) {
                 focusFlowEndAnchor();
+                return;
+              }
+
+              if (!isPreviewActive) {
+                syncEditorSelection();
               }
             }}
           >
@@ -972,19 +1484,12 @@ const App = () => {
                 <React.Fragment key={part.key}>
                   {part.type === 'text' ? (
                     <span
-                      contentEditable={!isPreviewActive}
-                      suppressContentEditableWarning
-                      spellCheck={false}
                       data-drop-kind="text"
+                      data-part-index={part.sourceIndex}
+                      data-part-type="text"
                       data-text-index={part.sourceIndex}
                       data-text-base-offset={part.textBaseOffset ?? 0}
                       data-text-full-value={part.fullTextValue ?? part.value}
-                      onFocus={!isPreviewActive ? (e) => syncTextSelectionFromDOM(e.currentTarget, part.sourceIndex) : undefined}
-                      onClick={!isPreviewActive ? (e) => syncTextSelectionFromDOM(e.currentTarget, part.sourceIndex) : undefined}
-                      onKeyUp={!isPreviewActive ? (e) => syncTextSelectionFromDOM(e.currentTarget, part.sourceIndex) : undefined}
-                      onMouseUp={!isPreviewActive ? (e) => syncTextSelectionFromDOM(e.currentTarget, part.sourceIndex) : undefined}
-                      onBlur={!isPreviewActive ? (e) => handleTextEdit(part.sourceIndex, e.currentTarget.innerText) : undefined}
-                      onKeyDown={!isPreviewActive ? (e) => handleTextKeyDown(e, part.sourceIndex) : undefined}
                       onDragOver={(e) =>
                         handleTextDragOver(
                           e,
@@ -994,35 +1499,39 @@ const App = () => {
                         )
                       }
                       onDrop={handleDrop}
-                      className={`inline rounded px-0.5 outline-none ${
-                        isPreviewActive ? 'select-none' : 'focus:bg-slate-100'
-                      }`}
+                      className={`inline rounded px-0.5 outline-none ${isPreviewActive ? 'select-none' : ''}`}
                     >
                       {part.value}
                     </span>
                   ) : part.type === 'bubble' ? (
-                    <span className="relative mx-1 inline-flex align-baseline">
-                      <button
-                        type="button"
+                    <span
+                      contentEditable={false}
+                      data-part-index={part.sourceIndex}
+                      data-part-type="bubble"
+                      data-part-value={part.value}
+                      data-part-category={part.category ?? ''}
+                      className="relative mx-1 inline-flex align-baseline"
+                      >
+                      <span
                         draggable={!part.isPreview}
                         data-drop-kind="boundary"
                         data-drop-before={part.dropBeforeAttr}
                         data-drop-after={part.dropAfterAttr}
+                        onMouseDown={
+                          part.isPreview
+                            ? undefined
+                            : (e) => {
+                                e.stopPropagation();
+                              }
+                        }
                         onClick={
                           part.isPreview
                             ? undefined
-                            : () => {
-                                setReplaceTargetIndex(part.sourceIndex);
-                                setSelectionTarget({ type: 'between', index: part.sourceIndex });
-                                setActiveCategory(part.category);
-                              }
-                        }
-                        onFocus={
-                          part.isPreview
-                            ? undefined
-                            : () => {
-                                setReplaceTargetIndex(part.sourceIndex);
-                                setSelectionTarget({ type: 'between', index: part.sourceIndex });
+                            : (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (hasExpandedDOMSelection() || suppressClickAfterSelectionRef.current) return;
+                                selectBubbleForReplacement(part.sourceIndex, part.category);
                               }
                         }
                         onDragStart={
@@ -1051,7 +1560,7 @@ const App = () => {
                         onKeyDown={part.isPreview ? undefined : (e) => handleBubbleKeyDown(e, part.sourceIndex)}
                         onDragOver={(e) => handleInlineBoundaryDragOver(e, beforeDrop, afterDrop)}
                         onDrop={handleDrop}
-                        className={`drag-chip inline-flex align-baseline rounded-full border items-center justify-center px-3.5 py-0.5 transition-all duration-150 ease-out shadow-sm overflow-hidden ${
+                        className={`drag-chip editor-chip inline-flex cursor-grab active:cursor-grabbing align-baseline rounded-full border items-center justify-center px-3.5 py-0.5 transition-all duration-150 ease-out shadow-sm overflow-hidden ${
                           part.isPreview
                             ? 'border-blue-300 bg-blue-100/80 text-blue-700 opacity-60 scale-[0.98] shadow-[0_10px_24px_rgba(59,130,246,0.14)]'
                             : replaceTargetIndex === part.sourceIndex
@@ -1060,7 +1569,7 @@ const App = () => {
                         } ${part.isNew ? 'bubble-pop' : ''}`}
                       >
                         <span className="font-bold text-sm">{part.value}</span>
-                      </button>
+                      </span>
                       {!part.isPreview && (
                         <button
                           type="button"
@@ -1087,19 +1596,28 @@ const App = () => {
                       )}
                     </span>
                   ) : (
-                    <button
-                      type="button"
+                    <span
+                      contentEditable={false}
+                      data-part-index={part.sourceIndex}
+                      data-part-type="placeholder"
+                      data-part-value={part.value}
+                      data-part-category={part.category ?? ''}
                       data-drop-kind="boundary"
                       data-drop-before={part.dropBeforeAttr}
                       data-drop-after={part.dropAfterAttr}
-                      onClick={() => {
-                        setReplaceTargetIndex(part.sourceIndex);
-                        setSelectionTarget({ type: 'between', index: part.sourceIndex });
-                        setActiveCategory(part.category);
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (hasExpandedDOMSelection() || suppressClickAfterSelectionRef.current) return;
+                        selectBubbleForReplacement(part.sourceIndex, part.category);
                       }}
                       onDragOver={(e) => handleInlineBoundaryDragOver(e, beforeDrop, afterDrop)}
                       onDrop={handleDrop}
-                      className={`drag-chip mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border-2 border-dashed items-center gap-1 transition-all ${
+                      className={`drag-chip editor-chip mx-1 inline-flex align-baseline px-3 py-0.5 rounded-full border-2 border-dashed items-center gap-1 transition-all ${
                         replaceTargetIndex === part.sourceIndex
                           ? 'border-blue-500 bg-blue-50 text-blue-600 scale-105 shadow-sm'
                           : 'border-slate-300 bg-slate-50 text-slate-500 animate-pulse'
@@ -1107,31 +1625,11 @@ const App = () => {
                     >
                       <PlusCircle size={14} />
                       <span className="text-sm font-bold">{part.value}</span>
-                    </button>
+                    </span>
                   )}
                 </React.Fragment>
               );
             })}
-            {showFlowEndAnchor && (
-              <span
-                ref={flowEndRef}
-                contentEditable
-                suppressContentEditableWarning
-                spellCheck={false}
-                onFocus={syncFlowEndSelection}
-                onClick={syncFlowEndSelection}
-                onMouseUp={syncFlowEndSelection}
-                onKeyUp={syncFlowEndSelection}
-                onKeyDown={handleFlowEndKeyDown}
-                onBlur={(e) => {
-                  e.currentTarget.textContent = FLOW_END_MARKER;
-                }}
-                className="inline-block min-w-[0.7rem] align-baseline rounded outline-none text-transparent"
-                style={{ caretColor: '#2563eb' }}
-              >
-                {FLOW_END_MARKER}
-              </span>
-            )}
           </div>
 
           <div className="mt-auto pt-6 flex justify-between items-center text-slate-300 pointer-events-none">
@@ -1254,6 +1752,10 @@ const App = () => {
           -webkit-touch-callout: none;
           touch-action: none;
           -webkit-user-drag: element;
+        }
+        .editor-chip {
+          -webkit-user-select: text;
+          user-select: text;
         }
         .bubble-pop {
           animation: bubble-expand 180ms ease-out;
