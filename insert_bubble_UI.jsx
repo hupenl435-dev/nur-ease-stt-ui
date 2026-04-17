@@ -13,6 +13,12 @@ import {
   User,
   ArrowRightLeft,
   Settings,
+  BookText,
+  ChevronDown,
+  ChevronUp,
+  Search,
+  Upload,
+  Undo2,
 } from 'lucide-react';
 
 const TOUCH_DRAG_THRESHOLD = 8;
@@ -310,6 +316,81 @@ const createItemsData = () => {
   };
 };
 
+const nursingTemplates = [
+  {
+    id: 'admission-care',
+    title: '入院與評估',
+    items: [
+      {
+        id: 'admission-initial',
+        title: '入院初評',
+        content:
+          '個案意識清楚，生命徵象穩定。已完成入院環境介紹與設備說明，提醒床欄使用及呼叫鈴位置，並進行跌倒風險與皮膚完整性評估。',
+      },
+      {
+        id: 'admission-pain',
+        title: '疼痛評估',
+        content:
+          '個案主訴疼痛指數四分，部位位於術後傷口周圍，已協助採舒適臥位並依醫囑處置，後續持續追蹤疼痛變化與緩解情形。',
+      },
+    ],
+  },
+  {
+    id: 'shift-handoff',
+    title: '交班與觀察',
+    items: [
+      {
+        id: 'shift-routine',
+        title: '一般交班',
+        content:
+          '本班觀察個案呼吸平順，膚色無明顯發紺，主訴不適已處理並持續追蹤。管路固定完整、引流量已紀錄，後續請持續監測生命徵象與症狀變化。',
+      },
+      {
+        id: 'shift-sleep',
+        title: '夜班睡眠觀察',
+        content:
+          '夜班期間個案可間歇入睡，呼吸規則，未訴明顯不適。已協助維持病室安靜與舒適環境，持續觀察夜間休息品質。',
+      },
+    ],
+  },
+  {
+    id: 'medication-education',
+    title: '給藥與衛教',
+    items: [
+      {
+        id: 'medication-admin',
+        title: '給藥紀錄',
+        content:
+          '依醫囑給予藥物，給藥前完成病人身分與藥物核對，給藥後未訴立即不適，已衛教藥物作用與可能副作用，請持續觀察反應。',
+      },
+      {
+        id: 'medication-teach',
+        title: '用藥衛教',
+        content:
+          '已向個案說明藥物服用時間、可能副作用及注意事項，個案可口述重點內容，表示理解並願意配合治療計畫。',
+      },
+    ],
+  },
+  {
+    id: 'discharge-planning',
+    title: '出院準備',
+    items: [
+      {
+        id: 'discharge-teach',
+        title: '出院衛教',
+        content:
+          '已向個案及家屬說明返家後用藥方式、飲食注意事項、傷口照護與異常警訊，並提醒依約返診；個案及家屬表示了解。',
+      },
+      {
+        id: 'discharge-followup',
+        title: '返家追蹤提醒',
+        content:
+          '已提醒個案依門診時間返診，若出現發燒、傷口紅腫滲液或症狀加劇應儘速就醫，並鼓勵家屬共同協助觀察。',
+      },
+    ],
+  },
+];
+
 const App = () => {
   const [contentParts, setContentParts] = useState([
     { type: 'text', value: '病人目前使用 ' },
@@ -327,6 +408,12 @@ const App = () => {
   const [isDraggingOverEditor, setIsDraggingOverEditor] = useState(false);
   const [caretIndicator, setCaretIndicator] = useState(null);
   const [activeShortcut, setActiveShortcut] = useState('record');
+  const [isTemplatePanelOpen, setIsTemplatePanelOpen] = useState(false);
+  const [isQuickInsertPanelOpen, setIsQuickInsertPanelOpen] = useState(false);
+  const [footerPanelMode, setFooterPanelMode] = useState('templates');
+  const [expandedTemplateGroupId, setExpandedTemplateGroupId] = useState(null);
+  const [expandedTemplateId, setExpandedTemplateId] = useState(null);
+  const [templateSearchTerm, setTemplateSearchTerm] = useState('');
   const [itemsData] = useState(() => createItemsData());
 
   const editorRef = useRef(null);
@@ -568,6 +655,41 @@ const App = () => {
     { id: 'nursePractitioner', label: '專科護理師', icon: <ClipboardList size={16} /> },
     { id: 'medication', label: '用藥', icon: <Pill size={16} /> },
   ];
+
+  const filteredTemplates = nursingTemplates
+    .map((group) => {
+      const keyword = templateSearchTerm.trim().toLowerCase();
+      if (!keyword) return group;
+
+      const matchedItems = group.items.filter(
+        (item) =>
+          item.title.toLowerCase().includes(keyword)
+          || item.content.toLowerCase().includes(keyword),
+      );
+
+      if (group.title.toLowerCase().includes(keyword)) {
+        return group;
+      }
+
+      if (matchedItems.length === 0) {
+        return null;
+      }
+
+      return {
+        ...group,
+        items: matchedItems,
+      };
+    })
+    .filter(Boolean);
+
+  const openFooterPanel = (mode) => {
+    setFooterPanelMode(mode);
+    setIsTemplatePanelOpen(true);
+
+    if (mode === 'quickInsert' && !activeCategory) {
+      setActiveCategory('physician');
+    }
+  };
 
   const getTransparentDragImage = () => {
     if (transparentDragImageRef.current) return transparentDragImageRef.current;
@@ -835,6 +957,7 @@ const App = () => {
 
   const handleInsertValue = (value) => {
     insertValueAtSelection(value);
+    setIsQuickInsertPanelOpen(false);
   };
 
   const selectBubbleForReplacement = (index, category) => {
@@ -896,6 +1019,7 @@ const App = () => {
   const syncEditorSelection = () => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || !flowRef.current) {
+      clearVisualIndicator();
       return;
     }
 
@@ -907,6 +1031,7 @@ const App = () => {
     }
 
     if (!flowRef.current.contains(range.startContainer)) {
+      clearVisualIndicator();
       return;
     }
 
@@ -917,12 +1042,13 @@ const App = () => {
     );
 
     if (linearOffset === null) {
+      clearVisualIndicator();
       return;
     }
 
     setSelectionTarget(getSelectionTargetFromLinearOffset(contentParts, linearOffset));
     setReplaceTargetIndex(null);
-    updateIndicatorFromRange(range);
+    clearVisualIndicator();
   };
 
   const handleFlowMouseUp = () => {
@@ -1004,6 +1130,16 @@ const App = () => {
     );
   };
 
+  const replaceEditorContentWithText = (text) => {
+    if (!text) return;
+
+    updateContentParts([{ type: 'text', value: text }], {
+      type: 'text',
+      index: 0,
+      offset: text.length,
+    });
+  };
+
   const deleteSelectedRange = (range) => {
     if (!range) return false;
 
@@ -1057,6 +1193,14 @@ const App = () => {
   };
 
   const handleEditorKeyDownCapture = (e) => {
+    const interactiveTarget = e.target;
+    if (
+      interactiveTarget instanceof HTMLElement
+      && interactiveTarget.closest('input, textarea, select')
+    ) {
+      return;
+    }
+
     if (e.key !== 'Backspace' && e.key !== 'Delete') {
       return;
     }
@@ -1301,6 +1445,7 @@ const App = () => {
     if (!droppedValue) return;
 
     insertValueAtSelection(droppedValue, dragPayload?.category ?? activeCategory);
+    setIsQuickInsertPanelOpen(false);
   };
 
   const startTouchDrag = (payload, touch) => {
@@ -1361,6 +1506,7 @@ const App = () => {
           session.dropTarget.replaceTargetIndex,
           session.dropTarget.selectionTarget,
         );
+        setIsQuickInsertPanelOpen(false);
       }
     }
 
@@ -1655,7 +1801,775 @@ const App = () => {
             })}
           </div>
 
-          <div className="mt-auto pt-6 flex justify-end items-center pointer-events-none">
+          <div className="hidden">
+            <div
+              className={`overflow-hidden rounded-[1.75rem] bg-slate-50/90 transition-all duration-300 ease-out ${
+                isTemplatePanelOpen
+                  ? 'max-h-[26rem] translate-y-0 border border-slate-200 opacity-100'
+                  : 'max-h-0 translate-y-4 border border-transparent opacity-0'
+              }`}
+            >
+              <div className="border-b border-slate-200 px-4 py-3">
+                <div className="flex items-center gap-2 rounded-2xl bg-white p-1 ring-1 ring-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setFooterPanelMode('templates')}
+                    className={`flex-1 rounded-[1rem] px-3 py-2 text-xs font-bold transition-colors ${
+                      footerPanelMode === 'templates'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    Templates
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFooterPanelMode('quickInsert');
+                      if (!activeCategory) setActiveCategory('physician');
+                    }}
+                    className={`flex-1 rounded-[1rem] px-3 py-2 text-xs font-bold transition-colors ${
+                      footerPanelMode === 'quickInsert'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    Quick Insert
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-[19rem] overflow-y-auto px-4 py-3">
+                {footerPanelMode === 'templates' ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                      <Search size={14} className="shrink-0 text-slate-400" />
+                      <input
+                        type="text"
+                        value={templateSearchTerm}
+                        onChange={(e) => setTemplateSearchTerm(e.target.value)}
+                        placeholder="Search templates"
+                        className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                      />
+                    </div>
+
+                    {filteredTemplates.length > 0 ? (
+                      filteredTemplates.map((group) => {
+                        const isGroupExpanded = expandedTemplateGroupId === group.id;
+
+                        return (
+                          <div
+                            key={group.id}
+                            className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setExpandedTemplateGroupId((prev) => (prev === group.id ? null : group.id));
+                                setExpandedTemplateId(null);
+                              }}
+                              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+                              aria-expanded={isGroupExpanded}
+                            >
+                              <span className="truncate text-sm font-bold text-slate-700">{group.title}</span>
+                              {isGroupExpanded ? (
+                                <ChevronUp size={16} className="shrink-0 text-slate-400" />
+                              ) : (
+                                <ChevronDown size={16} className="shrink-0 text-slate-400" />
+                              )}
+                            </button>
+
+                            {isGroupExpanded && (
+                              <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2">
+                                <div className="space-y-2">
+                                  {group.items.map((template) => {
+                                    const isItemExpanded = expandedTemplateId === template.id;
+
+                                    return (
+                                      <div
+                                        key={template.id}
+                                        className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+                                      >
+                                        <div className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-slate-50">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setExpandedTemplateId((prev) =>
+                                                prev === template.id ? null : template.id,
+                                              )
+                                            }
+                                            className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                                            aria-expanded={isItemExpanded}
+                                          >
+                                            <span className="truncate text-sm font-medium text-slate-700">
+                                              {template.title}
+                                            </span>
+                                            {isItemExpanded ? (
+                                              <ChevronUp size={15} className="shrink-0 text-slate-400" />
+                                            ) : (
+                                              <ChevronDown size={15} className="shrink-0 text-slate-400" />
+                                            )}
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => replaceEditorContentWithText(template.content)}
+                                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
+                                            aria-label={`Insert ${template.title}`}
+                                            title="Insert template"
+                                          >
+                                            <Upload size={14} />
+                                          </button>
+                                        </div>
+
+                                        {isItemExpanded && (
+                                          <div className="border-t border-slate-100 px-3 py-3">
+                                            <p className="text-xs leading-6 text-slate-600">
+                                              {template.content}
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-xs text-slate-400">
+                        No matching templates
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                      {categories.map((cat) => (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setActiveCategory(cat.id)}
+                          className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 whitespace-nowrap text-sm font-bold transition-all shadow-sm ${
+                            activeCategory === cat.id
+                              ? 'bg-slate-900 text-white'
+                              : 'border border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          {cat.icon}
+                          {cat.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {activeCategory &&
+                        itemsData[activeCategory].map((item, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            draggable
+                            onClick={() => handleInsertValue(item)}
+                            onDragStart={(e) => handleListItemDragStart(e, item)}
+                            onDragEnd={handleDragEnd}
+                            onTouchStart={(e) =>
+                              startTouchDrag(
+                                { type: 'library-item', value: item, category: activeCategory },
+                                e.touches[0],
+                              )
+                            }
+                            onTouchMove={handleTouchMove}
+                            onTouchEnd={handleTouchEnd}
+                            onTouchCancel={handleTouchCancel}
+                            className={`drag-chip flex items-center justify-between rounded-2xl border border-transparent bg-white p-4 shadow-sm transition-all duration-150 ease-out hover:border-blue-500 hover:text-blue-600 hover:shadow-md active:scale-95 group cursor-grab active:cursor-grabbing overflow-hidden ${
+                              isTouchDraggingListItem(item) ? 'pointer-events-none opacity-0' : ''
+                            }`}
+                          >
+                            <span className="truncate text-sm font-bold text-slate-700 group-hover:text-blue-600">
+                              {item}
+                            </span>
+                            <div
+                              className={`flex items-center justify-center rounded-full transition-colors ${
+                                isTouchDraggingListItem(item)
+                                  ? 'h-6 w-6 opacity-0'
+                                  : 'h-6 w-6 bg-slate-50 group-hover:bg-blue-600 group-hover:text-white'
+                              }`}
+                            >
+                              <Check size={12} className="opacity-0 group-hover:opacity-100" />
+                            </div>
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div
+              className={`overflow-hidden rounded-[1.75rem] bg-slate-50/90 ${
+                isQuickInsertPanelOpen
+                  ? 'max-h-[26rem] translate-y-0 border border-slate-200 opacity-100'
+                  : 'max-h-0 translate-y-4 border border-transparent opacity-0'
+              }`}
+            >
+              <div className="max-h-[19rem] overflow-y-auto px-4 py-3">
+                <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setActiveCategory(cat.id)}
+                      className={`flex items-center gap-2 px-5 py-3 rounded-2xl whitespace-nowrap transition-all font-bold text-sm shadow-sm ${
+                        activeCategory === cat.id
+                          ? 'bg-slate-900 text-white scale-105'
+                          : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
+                      }`}
+                    >
+                      {cat.icon}
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 pb-1">
+                  {activeCategory &&
+                    itemsData[activeCategory].map((item, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        draggable
+                        onClick={() => handleInsertValue(item)}
+                        onDragStart={(e) => handleListItemDragStart(e, item)}
+                        onDragEnd={handleDragEnd}
+                        onTouchStart={(e) =>
+                          startTouchDrag(
+                            { type: 'library-item', value: item, category: activeCategory },
+                            e.touches[0],
+                          )
+                        }
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={handleTouchEnd}
+                        onTouchCancel={handleTouchCancel}
+                        className={`drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 rounded-2xl border border-transparent hover:shadow-md transition-all duration-150 ease-out group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing overflow-hidden p-4 ${
+                          isTouchDraggingListItem(item) ? 'pointer-events-none opacity-0' : ''
+                        }`}
+                      >
+                        <span className="font-bold text-sm text-slate-700 group-hover:text-blue-600 truncate">
+                          {item}
+                        </span>
+                        <div
+                          className={`rounded-full bg-slate-50 flex items-center justify-center transition-colors ${
+                            isTouchDraggingListItem(item)
+                              ? 'w-6 h-6 opacity-0'
+                              : 'w-6 h-6 group-hover:bg-blue-600 group-hover:text-white'
+                          }`}
+                        >
+                          <Check size={12} className="opacity-0 group-hover:opacity-100" />
+                        </div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-[1.75rem] border border-slate-200 bg-slate-50/95 px-4 py-3 shadow-sm">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openFooterPanel('templates')}
+                  className={`flex h-11 min-w-[4.25rem] items-center justify-center gap-2 rounded-2xl border px-3 shadow-sm transition-all active:scale-95 ${
+                    isTemplatePanelOpen && footerPanelMode === 'templates'
+                      ? 'border-blue-200 bg-blue-50 text-blue-600'
+                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                  }`}
+                  aria-label="Templates"
+                  title="Templates"
+                >
+                  <BookText size={16} />
+                  {isTemplatePanelOpen && footerPanelMode === 'templates' ? (
+                    <ChevronDown size={15} />
+                  ) : (
+                    <ChevronUp size={15} />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openFooterPanel('quickInsert')}
+                  className={`flex h-11 min-w-[4.25rem] items-center justify-center gap-2 rounded-2xl border px-3 shadow-sm transition-all active:scale-95 ${
+                    isTemplatePanelOpen && footerPanelMode === 'quickInsert'
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                  }`}
+                  aria-label="Quick insert"
+                  title="Quick insert"
+                >
+                  <PlusCircle size={16} />
+                  {isTemplatePanelOpen && footerPanelMode === 'quickInsert' ? (
+                    <ChevronDown size={15} />
+                  ) : (
+                    <ChevronUp size={15} />
+                  )}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:bg-slate-100 hover:text-slate-700 active:scale-95"
+                  aria-label="Undo"
+                  title="Undo"
+                >
+                  <Undo2 size={14} />
+                </button>
+                
+                <button
+                  type="button"
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-indigo-200 bg-indigo-50 text-indigo-600 shadow-sm transition-all hover:bg-indigo-100 hover:text-indigo-700 active:scale-95"
+                  aria-label="AI assist"
+                  title="AI assist"
+                >
+                  <Sparkles size={14} />
+                </button>
+
+                <button
+                  type="button"
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm transition-all hover:bg-emerald-100 hover:text-emerald-700 active:scale-95"
+                  aria-label="Save and upload"
+                  title="Save and upload"
+                >
+                  <Upload size={15} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-auto pt-6 flex flex-col gap-3 pointer-events-auto">
+            <div
+              className={`overflow-hidden rounded-[1.75rem] bg-slate-50/90 transition-all duration-300 ease-out ${
+                isTemplatePanelOpen
+                  ? 'max-h-[26rem] translate-y-0 border border-slate-200 opacity-100'
+                  : 'max-h-0 translate-y-4 border border-transparent opacity-0'
+              }`}
+            >
+              <div className="border-b border-slate-200 px-4 py-3">
+                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                  <Search size={14} className="shrink-0 text-slate-400" />
+                  <input
+                    type="text"
+                    value={templateSearchTerm}
+                    onChange={(e) => setTemplateSearchTerm(e.target.value)}
+                    placeholder="搜尋模板"
+                    className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                  />
+                </div>
+              </div>
+
+              <div className="max-h-[19rem] space-y-2 overflow-y-auto px-4 py-3">
+                {filteredTemplates.length > 0 ? (
+                  filteredTemplates.map((group) => {
+                    const isGroupExpanded = expandedTemplateGroupId === group.id;
+
+                    return (
+                      <div
+                        key={group.id}
+                        className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedTemplateGroupId((prev) => (prev === group.id ? null : group.id));
+                            setExpandedTemplateId(null);
+                          }}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+                          aria-expanded={isGroupExpanded}
+                        >
+                          <span className="truncate text-sm font-bold text-slate-700">{group.title}</span>
+                          {isGroupExpanded ? (
+                            <ChevronUp size={16} className="shrink-0 text-slate-400" />
+                          ) : (
+                            <ChevronDown size={16} className="shrink-0 text-slate-400" />
+                          )}
+                        </button>
+
+                        {isGroupExpanded && (
+                          <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2">
+                            <div className="space-y-2">
+                              {group.items.map((template) => {
+                                const isItemExpanded = expandedTemplateId === template.id;
+
+                                return (
+                                  <div
+                                    key={template.id}
+                                    className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+                                  >
+                                    <div className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-slate-50">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExpandedTemplateId((prev) =>
+                                            prev === template.id ? null : template.id,
+                                          )
+                                        }
+                                        className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                                        aria-expanded={isItemExpanded}
+                                      >
+                                        <span className="truncate text-sm font-medium text-slate-700">
+                                          {template.title}
+                                        </span>
+                                        {isItemExpanded ? (
+                                          <ChevronUp size={15} className="shrink-0 text-slate-400" />
+                                        ) : (
+                                          <ChevronDown size={15} className="shrink-0 text-slate-400" />
+                                        )}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => replaceEditorContentWithText(template.content)}
+                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
+                                        aria-label={`帶入${template.title}`}
+                                        title="帶入輸入框"
+                                      >
+                                        <Upload size={14} />
+                                      </button>
+                                    </div>
+
+                                    {isItemExpanded && (
+                                      <div className="border-t border-slate-100 px-3 py-3">
+                                        <p className="text-xs leading-6 text-slate-600">
+                                          {template.content}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="relative rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-xs text-transparent">
+                    <span className="absolute inset-0 flex items-center justify-center text-slate-400">
+                      No matching templates
+                    </span>
+                    找不到符合的模板
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div
+              className={`overflow-hidden rounded-[1.75rem] bg-slate-50/90 ${
+                isQuickInsertPanelOpen
+                  ? 'max-h-[26rem] translate-y-0 border border-slate-200 opacity-100'
+                  : 'max-h-0 translate-y-4 border border-transparent opacity-0'
+              }`}
+            >
+              <div className="max-h-[19rem] overflow-y-auto px-4 py-3">
+                <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setActiveCategory(cat.id)}
+                      className={`flex items-center gap-2 px-5 py-3 rounded-2xl whitespace-nowrap transition-all font-bold text-sm shadow-sm ${
+                        activeCategory === cat.id
+                          ? 'bg-slate-900 text-white scale-105'
+                          : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
+                      }`}
+                    >
+                      {cat.icon}
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 pb-1">
+                  {activeCategory &&
+                    itemsData[activeCategory].map((item, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        draggable
+                        onClick={() => handleInsertValue(item)}
+                        onDragStart={(e) => handleListItemDragStart(e, item)}
+                        onDragEnd={handleDragEnd}
+                        onTouchStart={(e) =>
+                          startTouchDrag(
+                            { type: 'library-item', value: item, category: activeCategory },
+                            e.touches[0],
+                          )
+                        }
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={handleTouchEnd}
+                        onTouchCancel={handleTouchCancel}
+                        className={`drag-chip flex items-center justify-between bg-white hover:border-blue-500 hover:text-blue-600 rounded-2xl border border-transparent hover:shadow-md transition-all duration-150 ease-out group active:scale-95 shadow-sm cursor-grab active:cursor-grabbing overflow-hidden p-4 ${
+                          isTouchDraggingListItem(item) ? 'pointer-events-none opacity-0' : ''
+                        }`}
+                      >
+                        <span className="font-bold text-sm text-slate-700 group-hover:text-blue-600 truncate">
+                          {item}
+                        </span>
+                        <div
+                          className={`rounded-full bg-slate-50 flex items-center justify-center transition-colors ${
+                            isTouchDraggingListItem(item)
+                              ? 'w-6 h-6 opacity-0'
+                              : 'w-6 h-6 group-hover:bg-blue-600 group-hover:text-white'
+                          }`}
+                        >
+                          <Check size={12} className="opacity-0 group-hover:opacity-100" />
+                        </div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-[1.75rem] border border-slate-200 bg-slate-50/95 px-4 py-3 shadow-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQuickInsertPanelOpen(false);
+                  setIsTemplatePanelOpen((prev) => !prev);
+                }}
+                className="flex h-11 min-w-[4.25rem] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 text-slate-500 shadow-sm transition-all hover:bg-slate-100 hover:text-slate-700 active:scale-95"
+                aria-expanded={isTemplatePanelOpen}
+                aria-label="Toggle nursing templates"
+                title="護理模板"
+              >
+                <BookText size={16} className={isTemplatePanelOpen ? 'text-blue-600' : ''} />
+                {isTemplatePanelOpen ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTemplatePanelOpen(false);
+                  setIsQuickInsertPanelOpen((prev) => !prev);
+                  if (!activeCategory) {
+                    setActiveCategory(categories[0]?.id ?? null);
+                  }
+                }}
+                className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:bg-slate-100 hover:text-slate-700 active:scale-95"
+                aria-expanded={isQuickInsertPanelOpen}
+                aria-label="Toggle quick insert"
+                title="Quick insert"
+              >
+                <PlusCircle size={16} className={isQuickInsertPanelOpen ? 'text-blue-600' : ''} />
+              </button>
+
+              <div className="ml-auto flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:bg-slate-100 hover:text-slate-700 active:scale-95"
+                  aria-label="返回上一步"
+                  title="返回上一步"
+                >
+                  <Undo2 size={14} />
+                </button>
+                
+                <button
+                  type="button"
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-indigo-200 bg-indigo-50 text-indigo-600 shadow-sm transition-all hover:bg-indigo-100 hover:text-indigo-700 active:scale-95"
+                  aria-label="AI 優化"
+                  title="AI 優化"
+                >
+                  <Sparkles size={14} />
+                </button>
+
+                <button
+                  type="button"
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm transition-all hover:bg-emerald-100 hover:text-emerald-700 active:scale-95"
+                  aria-label="儲存並上傳"
+                  title="儲存並上傳"
+                >
+                  <Upload size={15} />
+                </button>
+              </div>
+            </div>
+
+            <div className="hidden">
+              <button
+                type="button"
+                onClick={() => setIsTemplatePanelOpen((prev) => !prev)}
+                className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left text-slate-600 transition-colors hover:text-slate-900"
+                aria-expanded={isTemplatePanelOpen}
+                aria-label="切換護理紀錄模板"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200">
+                    <BookText size={16} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-bold text-slate-700">護理模板</span>
+                    <span className="block truncate text-[11px] text-slate-400">快速展開常用護理紀錄稿</span>
+                  </span>
+                </span>
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-slate-400 ring-1 ring-slate-200">
+                  {isTemplatePanelOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                </span>
+              </button>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all"
+                >
+                  ?脣?
+                </button>
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-lg shadow-violet-200/50 active:scale-95 transition-all"
+                >
+                  <Sparkles size={14} />
+                  AI ?芸?
+                </button>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="flex items-center justify-center h-[32px] w-[32px] text-slate-400 hover:text-slate-600 transition-colors bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 active:scale-95"
+                  title="?儔"
+                >
+                  <RotateCcw size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden">
+            <div className="pointer-events-auto relative shrink-0">
+              {isTemplatePanelOpen && (
+                <div className="absolute bottom-full left-0 mb-3 w-[min(24rem,calc(100vw-5rem))] rounded-[1.5rem] border border-slate-200 bg-white/95 p-3 shadow-[0_20px_60px_rgba(15,23,42,0.16)] backdrop-blur">
+                  <div className="mb-3 flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <Search size={14} className="shrink-0 text-slate-400" />
+                    <input
+                      type="text"
+                      value={templateSearchTerm}
+                      onChange={(e) => setTemplateSearchTerm(e.target.value)}
+                      placeholder="搜尋模板"
+                      className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {filteredTemplates.length > 0 ? (
+                      filteredTemplates.map((group) => {
+                        const isGroupExpanded = expandedTemplateGroupId === group.id;
+
+                        return (
+                          <div
+                            key={group.id}
+                            className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setExpandedTemplateGroupId((prev) => (prev === group.id ? null : group.id));
+                                setExpandedTemplateId(null);
+                              }}
+                              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+                              aria-expanded={isGroupExpanded}
+                            >
+                              <span className="truncate text-sm font-bold text-slate-700">{group.title}</span>
+                              {isGroupExpanded ? (
+                                <ChevronUp size={16} className="shrink-0 text-slate-400" />
+                              ) : (
+                                <ChevronDown size={16} className="shrink-0 text-slate-400" />
+                              )}
+                            </button>
+
+                            {isGroupExpanded && (
+                              <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2">
+                                <div className="space-y-2">
+                                  {group.items.map((template) => {
+                                    const isItemExpanded = expandedTemplateId === template.id;
+
+                                    return (
+                                      <div
+                                        key={template.id}
+                                        className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+                                      >
+                                        <div className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-slate-50">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setExpandedTemplateId((prev) =>
+                                                prev === template.id ? null : template.id,
+                                              )
+                                            }
+                                            className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                                            aria-expanded={isItemExpanded}
+                                          >
+                                            <span className="truncate text-sm font-medium text-slate-700">
+                                              {template.title}
+                                            </span>
+                                            {isItemExpanded ? (
+                                              <ChevronUp size={15} className="shrink-0 text-slate-400" />
+                                            ) : (
+                                              <ChevronDown size={15} className="shrink-0 text-slate-400" />
+                                            )}
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => replaceEditorContentWithText(template.content)}
+                                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
+                                            aria-label={`帶入${template.title}`}
+                                            title="帶入輸入框"
+                                          >
+                                            <Upload size={14} />
+                                          </button>
+                                        </div>
+
+                                        {isItemExpanded && (
+                                          <div className="border-t border-slate-100 px-3 py-3">
+                                            <p className="text-xs leading-6 text-slate-600">
+                                              {template.content}
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-400">
+                        找不到符合的模板
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsTemplatePanelOpen((prev) => !prev)}
+                className={`flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs font-bold shadow-sm transition-all active:scale-95 ${
+                  isTemplatePanelOpen
+                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+                aria-expanded={isTemplatePanelOpen}
+                aria-label="切換護理紀錄模板"
+              >
+                <BookText size={15} />
+                <span>護理模板</span>
+                {isTemplatePanelOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+            </div>
+
             <div className="flex items-center gap-2 shrink-0">
               {/* 儲存按鈕 */}
               <button
@@ -1686,7 +2600,7 @@ const App = () => {
           </div>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar shrink-0">
+        <div className="hidden">
           {categories.map((cat) => (
             <button
               key={cat.id}
@@ -1703,7 +2617,7 @@ const App = () => {
           ))}
         </div>
 
-        <div className={`transition-all duration-300 ease-in-out overflow-hidden shrink-0 ${activeCategory ? 'h-[25vh] opacity-100' : 'h-0 opacity-0'}`}>
+        <div className="hidden">
           <div className="bg-slate-100/80 backdrop-blur-sm rounded-[2.5rem] p-5 h-full overflow-y-auto border border-slate-200 shadow-inner">
             {dragMode === 'touch' && dragPayload && (
               <p className="mb-3 text-xs font-bold tracking-wide text-blue-500">
